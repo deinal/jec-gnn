@@ -1,6 +1,5 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-import glob
 import shutil
 import tensorflow as tf
 import argparse
@@ -11,56 +10,14 @@ from src.particle_net import get_particle_net
 from src.data import create_datasets
 
 
-def prepare_dataset(net, dataset, config):
-    dataset = dataset.map(
-        lambda data, target: (
-            select_features(
-                net, data, config['features']['jet'], config['features']['pf']
-            ),
-            target
-        ),
-        num_parallel_calls=tf.data.AUTOTUNE
-    )
-
-    dataset = dataset.unbatch().batch(config['batch_size'])
-
-    dataset = dataset.prefetch(tf.data.AUTOTUNE)
-
-    return dataset
-
-
-def select_features(net, data, jet, pf):
-    # Concatenate the data
-    globals = tf.concat(
-        [data[f'jet_{field}'] for field in jet['numerical'] + jet['categorical']], axis=1
-    )
-    constituents = tf.concat(
-        [data[f'pf_{field}'] for field in 
-        pf['numerical'] + pf['categorical'] + pf['synthetic']], axis=2
-    )
-    
-    # Mind the order of the inputs when constructing the model!
-    if net == 'deepset':
-        inputs = (constituents, globals)
-    if net == 'particlenet':
-        inputs = (constituents, globals, data['points'], data['coord_shift'], data['mask'])
-    
-    return inputs
-
-
-def calculate_num_features(features, category_map):
+def calculate_num_features(features):
     num_constituents = sum([
         len(features['pf']['numerical']),
-        sum([
-            len(category_map[f'pf_{field}']) for field in features['pf']['categorical']
-        ]),
-        len(features['pf']['synthetic'])
+        len(features['pf']['categorical'])
     ])
     num_globals = sum([
         len(features['jet']['numerical']),
-        sum([
-            len(category_map[f'jet_{field}']) for field in features['jet']['categorical']
-        ])
+        len(features['jet']['categorical'])
     ])
 
     return num_constituents, num_globals
@@ -90,7 +47,6 @@ if __name__ == '__main__':
     arg_parser.add_argument('-c', '--config', required=True, help='Config file')
     arg_parser.add_argument('--gpus', nargs='+', required=True, help='GPUs to run on in the form 0 1 etc.')
     arg_parser.add_argument('--save-model', action='store_true', help='If model should be saved')
-    arg_parser.add_argument('--unzip', action='store_true', help='Whether to unzip the input dataset or not')
     args = arg_parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(args.gpus)
@@ -107,37 +63,9 @@ if __name__ == '__main__':
 
     shutil.copyfile(args.config, f'{args.outdir}/config.yaml')
 
-    if len(glob.glob(os.path.join(args.indir, '*.root'))):
-        train_ds, val_ds, test_ds, metadata = create_datasets(net, args.indir, config['data'])
-    else:
-        with open(f'{args.indir}/metadata.pkl', 'rb') as f:
-            metadata = pickle.load(f)
+    train_ds, val_ds, test_ds, metadata = create_datasets(net, args.indir, config['data'])
 
-        if args.unzip:
-            compression = 'GZIP'
-        else:
-            compression = None
-
-        train_ds = tf.data.experimental.load(
-            os.path.join(args.indir, 'train'),
-            element_spec=metadata['element_spec'], compression=compression
-        )
-        val_ds = tf.data.experimental.load(
-            os.path.join(args.indir, 'val'),
-            element_spec=metadata['element_spec'], compression=compression
-        )
-        test_ds = tf.data.experimental.load(
-            os.path.join(args.indir, 'test'),
-            element_spec=metadata['element_spec'], compression=compression
-        )
-    
-    train_ds = prepare_dataset(net, train_ds, config['data'])
-    val_ds = prepare_dataset(net, val_ds, config['data'])
-    test_ds = prepare_dataset(net, test_ds, config['data'])
-
-    num_constituents, num_globals = calculate_num_features(
-        config['data']['features'], config['data']['transforms']['categorical']
-    )
+    num_constituents, num_globals = calculate_num_features(config['data']['features'])
 
     train_ds = train_ds.shuffle(config['shuffle_buffer'])
 
@@ -167,7 +95,7 @@ if __name__ == '__main__':
 
     # Save predictions and corresponding test files
     with open(os.path.join(args.outdir, 'predictions.pkl'), 'wb') as f:
-        pickle.dump((predictions, metadata['test_files']), f)
+        pickle.dump((predictions, metadata['test_dirs']), f)
 
     # Save training history
     with open(os.path.join(args.outdir, 'history.pkl'), 'wb') as f:
