@@ -7,21 +7,14 @@ import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from src.data import read_nanoaod
 
 
 def read_data(paths, ds_predictions, pn_predictions):
     dfs = []
     for path in paths:
-        valid_jets = read_nanoaod(path)
+        jet = ak.from_parquet(os.path.join(path, 'jet.parquet'))
 
-        jet_pt = ak.to_pandas(valid_jets.pt)
-        gen_jet_pt = ak.to_pandas(valid_jets.matched_gen.pt)
-        gen_jet_eta = ak.to_pandas(valid_jets.matched_gen.eta)
-        parton_flavour = ak.to_pandas(valid_jets.matched_gen.partonFlavour)
-        hadron_flavour = ak.to_pandas(valid_jets.matched_gen.hadronFlavour)
-
-        df = pd.concat((jet_pt, gen_jet_pt, gen_jet_eta, parton_flavour, hadron_flavour), axis=1)
+        df = pd.DataFrame(np.array(jet[['pt', 'gen_pt', 'gen_eta', 'gen_partonFlavour', 'gen_hadronFlavour']]))
         df.columns = ['Jet_pt', 'GenJet_pt', 'GenJet_eta', 'GenJet_partonFlavour', 'GenJet_hadronFlavour']
 
         flavour = df.GenJet_hadronFlavour.where(df.GenJet_hadronFlavour != 0, other=np.abs(df.GenJet_partonFlavour))
@@ -128,6 +121,7 @@ def compare_flavours(dataframe, fig_dir):
         df_pteta = dataframe[
             (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
             & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
+            & (dataframe.GenJet_pt > pt_cut)
         ]
         ref_median, ref_median_error = [], []
         ds_median, ds_median_error = [], []
@@ -201,12 +195,9 @@ def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta
     fig.suptitle('Median ' + flavour_label + '-jet response w.r.t. gen p$_{T}$')
     
     ax = fig.add_subplot()
-
-    vals = np.geomspace(0.5, 50, 20)
-    shift = np.sqrt(vals[:-1] * vals[1:])
     
     ax.errorbar(
-        bin_centers - shift, ref_median, yerr=ref_median_error,
+        bin_centers, ref_median, yerr=ref_median_error,
         ms=3, fmt='o', elinewidth=0.8, label='Standard'
     )
     ax.errorbar(
@@ -214,7 +205,7 @@ def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta
         ms=3, fmt='^', elinewidth=0.8, label='Deep Sets'
     )
     ax.errorbar(
-        bin_centers + shift, pn_median, yerr=pn_median_error, 
+        bin_centers, pn_median, yerr=pn_median_error, 
         ms=3, fmt='s', elinewidth=0.8, label='ParticleNet'
     )
     ax.axhline(1, ls='dashed', c='gray', alpha=.7)
@@ -385,11 +376,8 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
 
     fig.suptitle('Median response residuals w.r.t. gen p$_{T}$')
 
-    vals = np.geomspace(0.5, 50, 20)
-    shift = np.sqrt(vals[:-1] * vals[1:])
-
     ax.errorbar(
-        bin_centers - shift, diff, yerr=err, 
+        bin_centers, diff, yerr=err, 
         ms=3, fmt='o', elinewidth=0.8, label='Standard'
     )
     ax.errorbar(
@@ -397,7 +385,7 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
         ms=3, fmt='^', elinewidth=0.8, label='Deep Sets'
     )
     ax.errorbar(
-        bin_centers + shift, pn_diff, yerr=pn_err, 
+        bin_centers, pn_diff, yerr=pn_err, 
         ms=3, fmt='s', lw=0, elinewidth=0.8, label='ParticleNet'
     )
     ax.axhline(0, ls='dashed', c='gray', alpha=.7)
