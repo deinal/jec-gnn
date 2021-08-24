@@ -1,142 +1,90 @@
 import os
 import glob
-import warnings
 import tensorflow as tf
 import awkward as ak
 import numpy as np
-import math
-from coffea.nanoevents import NanoEventsFactory, PFNanoAODSchema
 
 
 def create_datasets(net, indir, config):
-    root_paths = glob.glob(os.path.join(indir, '*.root'))
-    num_files = len(root_paths)
-    train_split = int(config['train_size'] * num_files)
-    test_split = int(config['test_size'] * num_files) + train_split
+    parquet_dirs = glob.glob(os.path.join(indir, '*'))
+    num_dirs = len(parquet_dirs)
+    train_split = int(config['train_size'] * num_dirs)
+    test_split = int(config['test_size'] * num_dirs) + train_split
     
-    train_files = root_paths[:train_split]
-    test_files = root_paths[train_split:test_split]
-    val_files = root_paths[test_split:]
+    train_dirs = parquet_dirs[:train_split]
+    test_dirs = parquet_dirs[train_split:test_split]
+    val_dirs = parquet_dirs[test_split:]
+
+    jet_categorical = []
+    for key, categories in config['features']['jet']['categorical'].items():
+        jet_categorical.extend([f'{key}_{i}' for i in range(len(categories))])
+    config['features']['jet']['categorical'] = jet_categorical
+
+    pf_categorical = []
+    for key, categories in config['features']['pf']['categorical'].items():
+        pf_categorical.extend([f'{key}_{i}' for i in range(len(categories))])
+    config['features']['pf']['categorical'] = pf_categorical
 
     train_ds = _create_dataset(
-        net, train_files, config['features'],
-        config['num_points'], config['transforms']
+        net, train_dirs, config['features'],
+        config['num_points'], config['batch_size']
     )
     test_ds = _create_dataset(
-        net, test_files, config['features'],
-        config['num_points'], config['transforms']
+        net, test_dirs, config['features'],
+        config['num_points'], config['batch_size']
     )
     val_ds = _create_dataset(
-        net, val_files, config['features'],
-        config['num_points'], config['transforms']
+        net, val_dirs, config['features'],
+        config['num_points'], config['batch_size']
     )
     
     metadata = {
-        'train_files': train_files,
-        'test_files': test_files,
-        'val_files': val_files,
-        'element_spec': train_ds.element_spec,
+        'train_dirs': train_dirs,
+        'test_dirs': test_dirs,
+        'val_dirs': val_dirs,
         'num_points': config['num_points']
     }
 
     return train_ds, val_ds, test_ds, metadata
 
 
-def _create_dataset(net, files, features, num_points, transforms):
-    dataset = tf.data.Dataset.from_tensor_slices(files)
-
+def _create_dataset(net, paths, features, num_points, batch_size):
+    dataset = tf.data.Dataset.from_tensor_slices(paths)
     dataset = dataset.map(
         lambda path: _retrieve_data(
             net, path, num_points, features['jet'], features['pf']
         ),
         num_parallel_calls=tf.data.AUTOTUNE # a fixed number instead of autotune limits the RAM usage
     )
-
-    tables = _create_category_tables(transforms['categorical'])
-
     dataset = dataset.map(
         lambda data, target: (
-            _preprocess(
-                net, data, tables, transforms, features['jet'], features['pf']
+            _prepare_inputs(
+                net, data, features['jet'], features['pf']
             ),
             target
         ),
         num_parallel_calls=tf.data.AUTOTUNE
     )
+    dataset = dataset.unbatch().batch(batch_size)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     return dataset
 
 
-def _preprocess(net, data, tables, transforms, jet, pf):
-    # Create synthetic features
-    if 'rel_pt' in pf['synthetic']:
-        data['pf_rel_pt'] = data['pf_pt'] / tf.expand_dims(data['jet_pt'], axis=1)
-
-    if 'rel_eta' in pf['synthetic']:
-        jet_eta = tf.expand_dims(data['jet_eta'], axis=1)
-        data['pf_rel_eta'] = (data['pf_eta'] - jet_eta) * tf.math.sign(jet_eta)
-
-    if 'rel_phi' in pf['synthetic']:
-        phi_diff = data['pf_phi'] - tf.expand_dims(data['jet_phi'], axis=1)
-        data['pf_rel_phi'] = (phi_diff + math.pi) % (2 * math.pi) - math.pi
+def _prepare_inputs(net, data, jet, pf):
+    globals = tf.concat([data[f'jet_{field}'] for field in jet['numerical'] + jet['categorical']], axis=1)
+    constituents = tf.concat([data[f'pf_{field}'] for field in pf['numerical'] + pf['categorical']], axis=2)
 
     # Create ParticleNet inputs
     if net == 'particlenet':
         data['mask'] = tf.cast(tf.math.not_equal(data['pf_rel_eta'], 0), dtype=tf.float32) # 1 if valid
         data['coord_shift'] = tf.multiply(1e6, tf.cast(tf.math.equal(data['mask'], 0), dtype=tf.float32))
         data['points'] = tf.concat([data['pf_rel_eta'], data['pf_rel_phi']], axis=2)
+        inputs = (constituents, globals, data['points'], data['coord_shift'], data['mask'])
+    if net == 'deepset':
+        inputs = (constituents, globals)
 
-    # Transform the data
-    for name, transform in transforms['numerical'].items():
-        if name in data:
-            if transform == 'log':
-                data[name] = tf.math.log(data[name])
-            elif transform == 'abs':
-                data[name] = tf.math.abs(data[name])
-            elif transform == 'sqrt':
-                data[name] = tf.math.sqrt(data[name])
-            else:
-                raise RuntimeError(f'Unknown transform {transform} for {name}.')
-
-    for name, categories in transforms['categorical'].items():
-        if name in data:
-            encoded_feature = _one_hot_encode(data[name], tables[name], categories)
-            if name.startswith('jet'):
-                data[name] = tf.squeeze(encoded_feature, axis=1) # Remove excess dimension created by tf.one_hot
-            if name.startswith('pf'):
-                data[name] = tf.squeeze(encoded_feature, axis=2)
-
-    return data
-
-
-def _one_hot_encode(feature, table, categories):
-    cardinality = len(categories)
-
-    # Map integer categories to an ordered list e.g. charge from [-1, 0, 1] to [0, 1, 2]
-    if isinstance(feature, tf.RaggedTensor):
-        feature = tf.ragged.map_flat_values(lambda x: table.lookup(x), feature)
-    else:
-        feature = table.lookup(feature)
-
-    # One-hot encode categories to orthogonal vectors e.g. [0, 1, 2] to [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-    return tf.one_hot(tf.cast(feature, tf.int32), depth=cardinality, dtype=tf.float32)
-
-
-def _create_category_tables(category_map):
-    tables = {}
-
-    for name, categories in category_map.items():
-        keys_tensor = tf.constant(categories)
-        vals_tensor = tf.range(len(categories))
-
-        table = tf.lookup.StaticHashTable(
-            tf.lookup.KeyValueTensorInitializer(keys_tensor, vals_tensor),
-            default_value=-1
-        )
-
-        tables[name] = table
-
-    return tables
+    return inputs
 
 
 def _retrieve_data(net, path, num_points, jet, pf):
@@ -153,11 +101,11 @@ def _retrieve_data(net, path, num_points, jet, pf):
         pf['numerical'], pf['categorical']
     ]
     Tout = (
-        [tf.float32] +
+        [tf.float32] + 
         [tf.float32] * len(jet['numerical']) +
-        [tf.int32] * len(jet['categorical']) +
+        [tf.float32] * len(jet['categorical']) +
         [tf.float32] * len(pf['numerical']) +
-        [tf.int32] * len(pf['categorical'])
+        [tf.float32] * len(pf['categorical'])
     )
 
     if net == 'deepset':
@@ -196,7 +144,7 @@ def _retrieve_data(net, path, num_points, jet, pf):
             # Shape from (None, P) to (None, P, 1)
             data[name] = tf.expand_dims(data[name], axis=2)
 
-    return (data, target)
+    return (data, target) #, sample_weights)
 
 
 def _retrieve_np_data(
@@ -211,21 +159,15 @@ def _retrieve_np_data(
     constituent_numerical = [field.decode() for field in constituent_numerical]
     constituent_categorical = [field.decode() for field in constituent_categorical]
 
-    valid_jets = read_nanoaod(path)
+    globals, constituents = read_parquet(path)
 
-    target = valid_jets.matched_gen.pt / valid_jets.pt
-
-    globals = valid_jets[global_numerical + global_categorical]
-
-    constituents = valid_jets.constituents.pf[constituent_numerical + constituent_categorical]
-    
-    data = [ak.to_numpy(target).astype(np.float32)]
+    data = [ak.to_numpy(globals.target).astype(np.float32)]
 
     for field in global_numerical:
         data.append(ak.to_numpy(globals[field]).astype(np.float32))
 
     for field in global_categorical:
-        data.append(ak.to_numpy(globals[field]).astype(np.int32))
+        data.append(ak.to_numpy(globals[field]).astype(np.float32))
 
     if net == 'deepset':
         row_lengths = ak.num(constituents, axis=1)
@@ -235,7 +177,7 @@ def _retrieve_np_data(
             data.append(ak.to_numpy(flat_constituents[field]).astype(np.float32))
 
         for field in constituent_categorical:
-            data.append(ak.to_numpy(flat_constituents[field]).astype(np.int32))
+            data.append(ak.to_numpy(flat_constituents[field]).astype(np.float32))
 
         data.append(ak.to_numpy(row_lengths).astype(np.int32))
 
@@ -248,28 +190,13 @@ def _retrieve_np_data(
         for field in constituent_categorical:
             none_padded_constituent = ak.pad_none(constituents[field], target=num_points, clip=True, axis=1)
             zero_padded_constituent = ak.to_numpy(none_padded_constituent).filled(0)
-            data.append(zero_padded_constituent.astype(np.int32))
+            data.append(zero_padded_constituent.astype(np.float32))
 
     return data
 
 
-def read_nanoaod(path):
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', message='found duplicate branch')
-        warnings.filterwarnings('ignore', message='missing cross-reference index')
-        events = NanoEventsFactory.from_root(path, schemaclass=PFNanoAODSchema).events()
+def read_parquet(path):
+    jet = ak.from_parquet(os.path.join(path, 'jet.parquet'))
+    pf = ak.from_parquet(os.path.join(path, 'pf.parquet'))
 
-    jets = events.Jet[(ak.count(events.Jet.matched_gen.pt, axis=1) >= 2)]
-
-    sorted_jets = jets[ak.argsort(jets.matched_gen.pt, ascending=False, axis=1)]
-
-    leading_jets = ak.concatenate((sorted_jets[:,0], sorted_jets[:,1]), axis=0)
-
-    selected_jets = leading_jets[(leading_jets.matched_gen.pt > 30) & (abs(leading_jets.matched_gen.eta) < 5)]
-
-    valid_jets = selected_jets[~ak.is_none(selected_jets.matched_gen.pt)]
-
-    for field in ['dz', 'dzErr', 'd0', 'd0Err']:
-        valid_jets = valid_jets[ak.all(valid_jets.constituents.pf[field] != np.inf, axis=1)]
-
-    return valid_jets
+    return jet, pf
