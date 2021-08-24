@@ -415,7 +415,7 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
 
     try:
-        os.mkdir(args.outdir)
+        os.makedirs(args.outdir)
     except FileExistsError:
         pass
 

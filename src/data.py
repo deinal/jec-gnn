@@ -57,11 +57,11 @@ def _create_dataset(net, paths, features, num_points, batch_size):
         num_parallel_calls=tf.data.AUTOTUNE # a fixed number instead of autotune limits the RAM usage
     )
     dataset = dataset.map(
-        lambda data, target: (
+        lambda data, target sample_weights: (
             _prepare_inputs(
                 net, data, features['jet'], features['pf']
             ),
-            target
+            target, sample_weights
         ),
         num_parallel_calls=tf.data.AUTOTUNE
     )
@@ -94,14 +94,14 @@ def _retrieve_data(net, path, num_points, jet, pf):
     constituent_names = [
         f'pf_{field}' for field in pf['numerical'] + pf['categorical']
     ]
-    names = ['target'] + global_names + constituent_names
+    names = ['target', 'sample_weights'] + global_names + constituent_names
 
     inp = [
         net, path, num_points, jet['numerical'], jet['categorical'], 
         pf['numerical'], pf['categorical']
     ]
     Tout = (
-        [tf.float32] +
+        [tf.float32] + [tf.float32] +
         [tf.float32] * len(jet['numerical']) +
         [tf.float32] * len(jet['categorical']) +
         [tf.float32] * len(pf['numerical']) +
@@ -118,6 +118,9 @@ def _retrieve_data(net, path, num_points, jet, pf):
 
     target = data.pop('target')
     target.set_shape((None,))
+
+    sample_weights = data.pop('sample_weights')
+    sample_weights.set_shape((None,))
 
     for name in global_names:
         # Shape from <unknown> to (None,)
@@ -144,7 +147,7 @@ def _retrieve_data(net, path, num_points, jet, pf):
             # Shape from (None, P) to (None, P, 1)
             data[name] = tf.expand_dims(data[name], axis=2)
 
-    return (data, target)
+    return (data, target) #, sample_weights)
 
 
 def _retrieve_np_data(
@@ -160,8 +163,8 @@ def _retrieve_np_data(
     constituent_categorical = [field.decode() for field in constituent_categorical]
 
     globals, constituents = read_parquet(path)
-    
-    data = [ak.to_numpy(globals.target).astype(np.float32)]
+
+    data = [ak.to_numpy(globals.target).astype(np.float32), ak.to_numpy(globals.sample_weights).astype(np.float32)]
 
     for field in global_numerical:
         data.append(ak.to_numpy(globals[field]).astype(np.float32))
