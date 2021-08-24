@@ -136,6 +136,7 @@ def compare_flavours(dataframe, fig_dir):
             (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
             & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
             & (dataframe.GenJet_pt > pt_cut)
+            & (dataframe.GenJet_pt < 3000)
         ]
         ref_median, ref_median_error = [], []
         dnn_median, dnn_median_error = [], []
@@ -412,7 +413,7 @@ if __name__ == '__main__':
     for (ieta, eta_bin), (flavour_label, flavour_ids) in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
         [
-            ('uds', {1, 2, 3}), ('b', {5}), ('g', {21}),
+            ('uds', {1, 2, 3}), ('c', {4}), ('b', {5}), ('g', {21}),
             ('all', {0, 1, 2, 3, 4, 5, 21})
         ]
     ):
@@ -435,7 +436,7 @@ if __name__ == '__main__':
     
     for (ieta, eta_bin), flavours in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
-        itertools.combinations([('uds', {1, 2, 3}), ('b', {5}), ('g', {21})], r=2),
+        itertools.combinations([('uds', {1, 2, 3}), ('c', {4}), ('b', {5}), ('g', {21})], r=2),
     ):
         bins = []
         for i, flavour_ids in enumerate([flavours[0][1], flavours[1][1]]):
