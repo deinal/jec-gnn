@@ -144,7 +144,7 @@ def _retrieve_data(net, path, num_points, jet, pf):
             # Shape from (None, P) to (None, P, 1)
             data[name] = tf.expand_dims(data[name], axis=2)
 
-    return (data, target) #, sample_weights)
+    return (data, target)
 
 
 def _retrieve_np_data(
