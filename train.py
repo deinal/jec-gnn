@@ -10,22 +10,26 @@ from src.particle_net import get_particle_net
 from src.data import create_datasets
 
 
-def calculate_num_features(features):
+def calculate_num_features(features, categories):
     num_ch = sum([
         len(features['ch']['numerical']),
-        len(features['ch']['categorical'])
+        sum([len(categories[field]) for field in features['ch']['categorical']]),
+        len(features['ch']['synthetic'])
     ])
     num_ne = sum([
         len(features['ne']['numerical']),
-        len(features['ne']['categorical'])
+        sum([len(categories[field]) for field in features['ne']['categorical']]),
+        len(features['ne']['synthetic'])
     ])
     num_sv = sum([
         len(features['sv']['numerical']),
-        len(features['sv']['categorical'])
+        sum([len(categories[field]) for field in features['sv']['categorical']]),
+        len(features['sv']['synthetic'])
     ])
     num_globals = sum([
         len(features['jet']['numerical']),
-        len(features['jet']['categorical'])
+        sum([len(categories[field]) for field in features['jet']['categorical']]),
+        len(features['jet']['synthetic'])
     ])
 
     return num_ch, num_ne, num_sv, num_globals
@@ -79,21 +83,21 @@ if __name__ == '__main__':
 
     train_ds, val_ds, test_ds, metadata = create_datasets(net, args.indir, config['data'])
 
-    num_ch, num_ne, num_sv, num_globals = calculate_num_features(config['data']['features'])
+    num_ch, num_ne, num_sv, num_globals = calculate_num_features(config['data']['features'], config['data']['transforms']['categorical'])
 
     train_ds = train_ds.shuffle(config['shuffle_buffer'])
 
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
-        if net == 'deepset':
+        if net == 'deep_sets':
             dnn = get_deep_sets(
                 num_ch, num_ne, num_sv, num_globals,
-                config['model']['deepset']
+                config['model']['deep_sets']
             )
-        if net == 'particlenet':
+        if net == 'particle_net':
             dnn = get_particle_net(
-                num_ch, num_globals, metadata['num_points'], 
-                config['model']['particlenet']
+                num_ch, num_ne, num_sv, num_globals, metadata['num_points'], 
+                config['model']['particle_net']
             )
 
         dnn.compile(optimizer=config['optimizer'], loss=get_loss())

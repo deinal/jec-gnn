@@ -8,13 +8,13 @@ def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
 
     ne_constituents = Input(shape=(None, num_ne), ragged=True, name='neutral constituents')
 
-    sv_constituents = Input(shape=(None, num_sv), ragged=True, name='secondary vertices')
+    secondary_vertices = Input(shape=(None, num_sv), ragged=True, name='secondary vertices')
 
-    ch_head = _deep_sets(ch_constituents, config, prefix='ch')
+    ch_head = _deep_sets(ch_constituents, config, name='ch')
 
-    ne_head = _deep_sets(ne_constituents, config, prefix='ne')
+    ne_head = _deep_sets(ne_constituents, config, name='ne')
 
-    sv_head = _deep_sets(sv_constituents, config, prefix='sv')
+    sv_head = _deep_sets(secondary_vertices, config, name='sv')
 
     globals = Input(shape=(num_globals,), name='globals')
 
@@ -25,9 +25,9 @@ def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
     if config['type'] == 'resnet':
         x = _resnet(inputs_head, config, name='head')
 
-    outputs = Dense(1, name='head_dense_output')(x)
+    outputs = Dense(1, name='output')(x)
 
-    model = Model(inputs=[ch_constituents, ne_constituents, sv_constituents, globals], outputs=outputs, name='dnn')
+    model = Model(inputs=[ch_constituents, ne_constituents, secondary_vertices, globals], outputs=outputs, name='dnn')
 
     model.summary()
 
@@ -38,25 +38,25 @@ def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
     return model
 
 
-def _deep_sets(constituents, config, prefix):
-    constituents_slice = Input(shape=(constituents.shape[-1],), name=f'{prefix}_constituents_slice')
+def _deep_sets(constituents, config, name):
+    constituents_slice = Input(shape=(constituents.shape[-1],), name=f'{name}_slice')
 
     if config['type'] == 'mlp':
-        deepset_outputs_slice = _mlp(constituents_slice, config, name=f'{prefix}_deepset')
+        deepset_outputs_slice = _mlp(constituents_slice, config, name)
     if config['type'] == 'resnet':
-        deepset_outputs_slice = _resnet(constituents_slice, config, name=f'{prefix}_deepset')
+        deepset_outputs_slice = _resnet(constituents_slice, config, name)
 
-    deepset_model_slice = Model(inputs=constituents_slice, outputs=deepset_outputs_slice, name=f'{prefix}_deepset_model_slice')
+    deepset_model_slice = Model(inputs=constituents_slice, outputs=deepset_outputs_slice, name=f'{name}_model')
 
-    deepset_outputs = TimeDistributed(deepset_model_slice, name=f'{prefix}_deepset_distributed')(constituents)
+    deepset_outputs = TimeDistributed(deepset_model_slice, name=f'{name}_time_distributed')(constituents)
 
-    constituents_head = Sum(axis=1, name=f'{prefix}_constituents_head')(deepset_outputs)
+    constituents_head = Sum(axis=1, name=f'{name}_head')(deepset_outputs)
 
     return constituents_head
 
 
 def _mlp(x, config, name):
-    for idx, units in enumerate(config['units'], start=1):
+    for idx, units in enumerate(config[name]['units'], start=1):
         x = Dense(units, kernel_initializer=config['initializer'], name=f'{name}_dense_{idx}')(x)
         if config['batch_norm']:
             x = BatchNormalization(name=f'{name}_batch_normalization_{idx}')(x)
@@ -67,7 +67,7 @@ def _mlp(x, config, name):
 
 
 def _resnet(x, config, name):
-    units = config['units']
+    units = config[name]['units']
     for idx in range(0, len(units) - 1, 2):
         n1 = units[idx]
         n2 = units[idx + 1]

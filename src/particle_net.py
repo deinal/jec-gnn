@@ -4,7 +4,7 @@ from tensorflow.keras.layers import Activation, Add, BatchNormalization, Conv2D,
 from src.layers import Mean, Max, Expand, Squeeze
 
 
-def get_particle_net(num_constituents, num_globals, num_points, config):
+def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
     """
     ParticleNet: Jet Tagging via Particle Clouds
     arxiv.org/abs/1902.08570
@@ -15,41 +15,64 @@ def get_particle_net(num_constituents, num_globals, num_points, config):
         The shapes of each input (`points`, `features`, `mask`).
     """
 
-    features = Input(name='features', shape=(num_points, num_constituents))
+    ch_fts = Input(name='charged constituents', shape=(num_points, num_ch))
+    ch_mask = Input(name='charged mask', shape=(num_points, 1))
+    ch_coord_shift = Input(name='charged coord shift', shape=(num_points, 1))
+    ch_points = Input(name='charged points', shape=(num_points, 2))
+    ne_fts = Input(name='neutral constituents', shape=(num_points, num_ne))
+    ne_mask = Input(name='neutral mask', shape=(num_points, 1))
+    ne_coord_shift = Input(name='neutral coord shift', shape=(num_points, 1))
+    ne_points = Input(name='neutral points', shape=(num_points, 2))
+    # sv_fts = Input(name='secondary_vertices', shape=(num_points, num_constituents))
     globals = Input(name='globals', shape=(num_globals,))
-    points = Input(name='points', shape=(num_points, 2))
-    coord_shift = Input(name='coord_shift', shape=(num_points, 1))
-    mask = Input(name='mask', shape=(num_points, 1))
 
-    outputs = _particle_net_base(points, features, mask, coord_shift, globals, config)
+    outputs = _particle_net_base(
+        ch_fts, ch_mask, ch_coord_shift, ch_points,
+        ne_fts, ne_mask, ne_coord_shift, ne_points,
+        globals, config
+    )
 
-    model = Model(inputs=[features, globals, points, coord_shift, mask], outputs=outputs)
+    model = Model(
+        inputs=[
+            ch_fts, ch_mask, ch_coord_shift, ch_points,
+            ne_fts, ne_mask, ne_coord_shift, ne_points,
+            globals
+        ], outputs=outputs
+    )
 
     model.summary()
 
     return model
 
 
-def _particle_net_base(points, features, mask, coord_shift, globals, config):
+def _particle_net_base(
+        ch_fts, ch_mask, ch_coord_shift, ch_points,
+        ne_fts, ne_mask, ne_coord_shift, ne_points,
+        globals, config
+    ):
     """
     points : (N, P, C_coord)
     features:  (N, P, C_features), optional
     mask: (N, P, 1), optional
     """
-
-    # fts = tf.squeeze(BatchNormalization(name='fts_bn')(tf.expand_dims(features, axis=2)), axis=2)
-    fts = features
+    
     for layer_idx, channels in enumerate(config['channels'], start=1):
-        pts = Add(name=f'add_{layer_idx}')([coord_shift, points]) if layer_idx == 1 else Add(name=f'add_{layer_idx}')([coord_shift, fts])
-        fts = _edge_conv(
-            pts, fts, config['num_points'], channels, config, name=f'edge_conv_{layer_idx}'
+        ch_pts = Add(name=f'ch_add_{layer_idx}')([ch_coord_shift, ch_points]) if layer_idx == 1 else Add(name=f'ch_add_{layer_idx}')([ch_coord_shift, ch_fts])
+        ch_fts = _edge_conv(
+            ch_pts, ch_fts, config['num_points'], channels, config, name=f'ch_edge_conv_{layer_idx}'
+        )
+        ne_pts = Add(name=f'ne_add_{layer_idx}')([ne_coord_shift, ne_points]) if layer_idx == 1 else Add(name=f'ne_add_{layer_idx}')([ne_coord_shift, ne_fts])
+        ne_fts = _edge_conv(
+            ne_pts, ne_fts, config['num_points'], channels, config, name=f'ne_edge_conv_{layer_idx}'
         )
 
-    fts = Multiply()([fts, mask])
+    ch_fts = Multiply()([ch_fts, ch_mask])
+    ne_fts = Multiply()([ne_fts, ne_mask])
 
-    pool = Mean(axis=1)(fts) # (N, C)
+    ch_pool = Mean(axis=1)(ch_fts) # (N, C)
+    ne_pool = Mean(axis=1)(ne_fts) # (N, C)
 
-    x = Concatenate(name='head')([pool, globals])
+    x = Concatenate(name='head')([ch_pool, ne_pool, globals])
 
     for layer_idx, units in enumerate(config['units']):
         x = Dense(units)(x)
