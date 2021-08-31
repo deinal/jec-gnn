@@ -15,27 +15,35 @@ def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
         The shapes of each input (`points`, `features`, `mask`).
     """
 
-    ch_fts = Input(name='charged constituents', shape=(num_points, num_ch))
-    ch_mask = Input(name='charged mask', shape=(num_points, 1))
-    ch_coord_shift = Input(name='charged coord shift', shape=(num_points, 1))
-    ch_points = Input(name='charged points', shape=(num_points, 2))
-    ne_fts = Input(name='neutral constituents', shape=(num_points, num_ne))
-    ne_mask = Input(name='neutral mask', shape=(num_points, 1))
-    ne_coord_shift = Input(name='neutral coord shift', shape=(num_points, 1))
-    ne_points = Input(name='neutral points', shape=(num_points, 2))
-    # sv_fts = Input(name='secondary_vertices', shape=(num_points, num_constituents))
+    ch_fts = Input(name='charged constituents', shape=(num_points['ch'], num_ch))
+    ch_mask = Input(name='charged mask', shape=(num_points['ch'], 1))
+    ch_coord_shift = Input(name='charged coord shift', shape=(num_points['ch'], 1))
+    ch_points = Input(name='charged points', shape=(num_points['ch'], 2))
+
+    ne_fts = Input(name='neutral constituents', shape=(num_points['ne'], num_ne))
+    ne_mask = Input(name='neutral mask', shape=(num_points['ne'], 1))
+    ne_coord_shift = Input(name='neutral coord shift', shape=(num_points['ne'], 1))
+    ne_points = Input(name='neutral points', shape=(num_points['ne'], 2))
+
+    sv_fts = Input(name='secondary vertices', shape=(num_points['sv'], num_sv))
+    sv_mask = Input(name='sv mask', shape=(num_points['sv'], 1))
+    sv_coord_shift = Input(name='sv coord shift', shape=(num_points['sv'], 1))
+    sv_points = Input(name='sv points', shape=(num_points['sv'], 2))
+    
     globals = Input(name='globals', shape=(num_globals,))
 
     outputs = _particle_net_base(
         ch_fts, ch_mask, ch_coord_shift, ch_points,
         ne_fts, ne_mask, ne_coord_shift, ne_points,
-        globals, config
+        sv_fts, sv_mask, sv_coord_shift, sv_points,
+        globals, config, num_points
     )
 
     model = Model(
         inputs=[
             ch_fts, ch_mask, ch_coord_shift, ch_points,
             ne_fts, ne_mask, ne_coord_shift, ne_points,
+            sv_fts, sv_mask, sv_coord_shift, sv_points,
             globals
         ], outputs=outputs
     )
@@ -48,42 +56,42 @@ def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
 def _particle_net_base(
         ch_fts, ch_mask, ch_coord_shift, ch_points,
         ne_fts, ne_mask, ne_coord_shift, ne_points,
-        globals, config
+        sv_fts, sv_mask, sv_coord_shift, sv_points,
+        globals, config, num_points
     ):
     """
     points : (N, P, C_coord)
     features:  (N, P, C_features), optional
     mask: (N, P, 1), optional
     """
-    
-    for layer_idx, channels in enumerate(config['channels'], start=1):
-        ch_pts = Add(name=f'ch_add_{layer_idx}')([ch_coord_shift, ch_points]) if layer_idx == 1 else Add(name=f'ch_add_{layer_idx}')([ch_coord_shift, ch_fts])
-        ch_fts = _edge_conv(
-            ch_pts, ch_fts, config['num_points'], channels, config, name=f'ch_edge_conv_{layer_idx}'
-        )
-        ne_pts = Add(name=f'ne_add_{layer_idx}')([ne_coord_shift, ne_points]) if layer_idx == 1 else Add(name=f'ne_add_{layer_idx}')([ne_coord_shift, ne_fts])
-        ne_fts = _edge_conv(
-            ne_pts, ne_fts, config['num_points'], channels, config, name=f'ne_edge_conv_{layer_idx}'
-        )
 
-    ch_fts = Multiply()([ch_fts, ch_mask])
-    ne_fts = Multiply()([ne_fts, ne_mask])
+    ch_pool = _constituent_block(ch_fts, ch_coord_shift, ch_points, ch_mask, num_points, config, prefix='ch')
+    ne_pool = _constituent_block(ne_fts, ne_coord_shift, ne_points, ne_mask, num_points, config, prefix='ne')
+    sv_pool = _constituent_block(sv_fts, sv_coord_shift, sv_points, sv_mask, num_points, config, prefix='sv')
 
-    ch_pool = Mean(axis=1)(ch_fts) # (N, C)
-    ne_pool = Mean(axis=1)(ne_fts) # (N, C)
+    x = Concatenate(name='head')([ch_pool, ne_pool, sv_pool, globals])
 
-    x = Concatenate(name='head')([ch_pool, ne_pool, globals])
-
-    for layer_idx, units in enumerate(config['units']):
-        x = Dense(units)(x)
-        x = Activation(config['activation'])(x)
+    for layer_idx, units in enumerate(config['units'], start=1):
+        x = Dense(units, name=f'dense_{layer_idx}')(x)
+        x = Activation(config['activation'], name=f'activation_{layer_idx}')(x)
         if config['dropout']:
-            x = Dropout(config['dropout'])(x)
+            x = Dropout(config['dropout'], name=f'dropout_{layer_idx}')(x)
     out = Dense(1, name='out')(x)
     return out # (N, num_classes)
 
 
-def _edge_conv(points, features, num_points, channels, config, name):
+def _constituent_block(fts, coord_shift, points, mask, num_points, config, prefix):
+    for layer_idx, channels in enumerate(config[prefix]['channels'], start=1):
+        pts = Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, points]) if layer_idx == 1 else Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, fts])
+        fts = _edge_conv(
+            pts, fts, num_points[prefix], channels, config[prefix]['K'], config, name=f'{prefix}_edge_conv_{layer_idx}'
+        )
+    fts = Multiply()([fts, mask])
+    pool = Mean(axis=1)(fts) # (N, C)
+    return pool
+
+
+def _edge_conv(points, features, num_points, channels, K, config, name):
     """EdgeConv
     Args:
         K: int, number of neighbors
@@ -98,7 +106,7 @@ def _edge_conv(points, features, num_points, channels, config, name):
     """
 
     fts = features
-    knn_fts = KNearestNeighbors(num_points, config['K'], name=f'{name}_knn')([points, fts])
+    knn_fts = KNearestNeighbors(num_points, K, name=f'{name}_knn')([points, fts])
 
     x = knn_fts
     for idx, channel in enumerate(channels, start=1):

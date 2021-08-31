@@ -17,32 +17,36 @@ def create_datasets(net, indir, config):
 
     train_ds = _create_dataset(
         net, train_files, config['features'],
-        config['num_points'], config['batch_size'], config['transforms']
+        config['batch_size'], config['transforms']
     )
     test_ds = _create_dataset(
         net, test_files, config['features'],
-        config['num_points'], config['batch_size'], config['transforms']
+        config['batch_size'], config['transforms']
     )
     val_ds = _create_dataset(
         net, val_files, config['features'],
-        config['num_points'], config['batch_size'], config['transforms']
+        config['batch_size'], config['transforms']
     )
     
     metadata = {
         'train_files': train_files,
         'test_files': test_files,
         'val_files': val_files,
-        'num_points': config['num_points']
+        'num_points': {
+            'ch': config['features']['ch']['num_points'],
+            'ne': config['features']['ne']['num_points'],
+            'sv': config['features']['sv']['num_points']
+        }
     }
 
     return train_ds, val_ds, test_ds, metadata
 
 
-def _create_dataset(net, paths, features, num_points, batch_size, transforms):
+def _create_dataset(net, paths, features, batch_size, transforms):
     dataset = tf.data.Dataset.from_tensor_slices(paths)
     dataset = dataset.map(
         lambda path: _retrieve_data(
-            net, path, num_points, features['jet'], features['ch'], features['ne'], features['sv']
+            net, path, features['jet'], features['ch'], features['ne'], features['sv']
         ),
         num_parallel_calls=tf.data.AUTOTUNE # a fixed number instead of autotune limits the RAM usage
     )
@@ -83,12 +87,16 @@ def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
         data['ch_rel_eta'] = (data['ch_eta'] - eta) * tf.math.sign(eta)
     if 'ne_rel_eta' in ne['synthetic']:
         data['ne_rel_eta'] = (data['ne_eta'] - eta) * tf.math.sign(eta)
+    if 'sv_rel_eta' in sv['synthetic']:
+        data['sv_rel_eta'] = (data['sv_eta'] - eta) * tf.math.sign(eta)
 
     phi = tf.expand_dims(data['phi'], axis=1)
     if 'ch_rel_phi' in ch['synthetic']:
         data['ch_rel_phi'] = (data['ch_phi'] - phi + np.pi) % (2 * np.pi) - np.pi
     if 'ne_rel_phi' in ne['synthetic']:
         data['ne_rel_phi'] = (data['ne_phi'] - phi + np.pi) % (2 * np.pi) - np.pi
+    if 'sv_rel_phi' in sv['synthetic']:
+        data['sv_rel_phi'] = (data['sv_phi'] - phi + np.pi) % (2 * np.pi) - np.pi
 
     if 'log_pt' in jet['synthetic']:
         data['log_pt'] = tf.math.log(data['pt'])
@@ -102,9 +110,11 @@ def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
     if net == 'particle_net':
         ch_mask, ch_coord_shift, ch_points = _construct_particle_net_inputs(data['ch_rel_eta'], data['ch_rel_phi'])
         ne_mask, ne_coord_shift, ne_points = _construct_particle_net_inputs(data['ne_rel_eta'], data['ne_rel_phi'])
+        sv_mask, sv_coord_shift, sv_points = _construct_particle_net_inputs(data['sv_rel_eta'], data['sv_rel_phi'])
         inputs = (
             ch_constituents, ch_mask, ch_coord_shift, ch_points,
             ne_constituents, ne_mask, ne_coord_shift, ne_points,
+            secondary_vertices, sv_mask, sv_coord_shift, sv_points,
             globals
         )
 
@@ -151,7 +161,7 @@ def _create_category_tables(category_map):
     return tables
 
 
-def _retrieve_data(net, path, num_points, jet, ch, ne, sv):
+def _retrieve_data(net, path, jet, ch, ne, sv):
     jet_fields = jet['numerical'] + jet['categorical']
     ch_fields = ch['numerical'] + ch['categorical']
     ne_fields = ne['numerical'] + ne['categorical']
@@ -165,8 +175,9 @@ def _retrieve_data(net, path, num_points, jet, ch, ne, sv):
 
     fields = ['target'] + jet_fields + pf_fields
     inp = [
-        net, path, num_points, jet['numerical'], jet['categorical'], 
-        pf['numerical'], pf['categorical']
+        net, path, jet['numerical'], jet['categorical'], 
+        pf['numerical'], pf['categorical'],
+        ch['num_points'], ne['num_points'], sv['num_points']
     ]
     Tout = (
         [tf.float32] + 
@@ -228,9 +239,21 @@ def _retrieve_data(net, path, num_points, jet, ch, ne, sv):
             data[field] = tf.expand_dims(data[field], axis=2)
     
     if net == 'particle_net':
-        for field in ch_fields + ne_fields + sv_fields:
+        for field in ch_fields:
             # Shape from <unknown> to (None, P)
-            data[field].set_shape((None, num_points))
+            data[field].set_shape((None, ch['num_points']))
+            # Shape from (None, P) to (None, P, 1)
+            data[field] = tf.expand_dims(data[field], axis=2)
+
+        for field in ne_fields:
+            # Shape from <unknown> to (None, P)
+            data[field].set_shape((None, ne['num_points']))
+            # Shape from (None, P) to (None, P, 1)
+            data[field] = tf.expand_dims(data[field], axis=2)
+        
+        for field in sv_fields:
+            # Shape from <unknown> to (None, P)
+            data[field].set_shape((None, sv['num_points']))
             # Shape from (None, P) to (None, P, 1)
             data[field] = tf.expand_dims(data[field], axis=2)
 
@@ -238,8 +261,9 @@ def _retrieve_data(net, path, num_points, jet, ch, ne, sv):
 
 
 def _retrieve_np_data(
-        net, path, num_points, global_numerical, global_categorical,
-        constituent_numerical, constituent_categorical
+        net, path, global_numerical, global_categorical,
+        constituent_numerical, constituent_categorical,
+        ch_num_points, ne_num_points, sv_num_points
     ):
     # Decode bytestrings
     net = net.decode()
@@ -248,6 +272,7 @@ def _retrieve_np_data(
     global_categorical = [field.decode() for field in global_categorical]
     constituent_numerical = [field.decode() for field in constituent_numerical]
     constituent_categorical = [field.decode() for field in constituent_categorical]
+    num_points = {'ch': ch_num_points, 'ne': ne_num_points, 'sv': sv_num_points}
 
     jets = uproot.open(path)['Jets'].arrays()
 
@@ -274,12 +299,14 @@ def _retrieve_np_data(
 
     if net == 'particle_net':
         for field in constituent_numerical:
-            none_padded_constituent = ak.pad_none(jets[field], target=num_points, clip=True, axis=1)
+            prefix = field[:2]
+            none_padded_constituent = ak.pad_none(jets[field], target=num_points[prefix], clip=True, axis=1)
             zero_padded_constituent = ak.to_numpy(none_padded_constituent).filled(0)
             data.append(zero_padded_constituent.astype(np.float32))
 
         for field in constituent_categorical:
-            none_padded_constituent = ak.pad_none(jets[field], target=num_points, clip=True, axis=1)
+            prefix = field[:2]
+            none_padded_constituent = ak.pad_none(jets[field], target=num_points[prefix], clip=True, axis=1)
             zero_padded_constituent = ak.to_numpy(none_padded_constituent).filled(0)
             data.append(zero_padded_constituent.astype(np.int32))
 
