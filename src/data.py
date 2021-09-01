@@ -69,12 +69,14 @@ def _create_dataset(net, paths, features, batch_size, transforms):
 
 
 def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
-    for field, categories in transforms['categorical'].items():
-        if field in data:
-            encoded_feature = _one_hot_encode(data[field], tables[field], categories)
-            data[field] = tf.squeeze(encoded_feature, axis=2)
-
     pt = tf.expand_dims(data['pt'], axis=1)
+    eta = tf.expand_dims(data['eta'], axis=1)
+    phi = tf.expand_dims(data['phi'], axis=1)
+
+    pf_pt = tf.concat((data['ch_pt'], data['ne_pt']), axis=1)
+    pf_eta = tf.concat((data['ch_eta'], data['ne_eta']), axis=1)
+    pf_phi = tf.concat((data['ch_phi'], data['ne_phi']), axis=1)
+
     if 'ch_rel_pt' in ch['synthetic']:
         data['ch_rel_pt'] = data['ch_pt'] / pt
     if 'ne_rel_pt' in ne['synthetic']:
@@ -82,7 +84,6 @@ def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
     if 'sv_rel_pt' in sv['synthetic']:
         data['sv_rel_pt'] = data['sv_pt'] / pt
     
-    eta = tf.expand_dims(data['eta'], axis=1)
     if 'ch_rel_eta' in ch['synthetic']:
         data['ch_rel_eta'] = (data['ch_eta'] - eta) * tf.math.sign(eta)
     if 'ne_rel_eta' in ne['synthetic']:
@@ -90,7 +91,6 @@ def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
     if 'sv_rel_eta' in sv['synthetic']:
         data['sv_rel_eta'] = (data['sv_eta'] - eta) * tf.math.sign(eta)
 
-    phi = tf.expand_dims(data['phi'], axis=1)
     if 'ch_rel_phi' in ch['synthetic']:
         data['ch_rel_phi'] = (data['ch_phi'] - phi + np.pi) % (2 * np.pi) - np.pi
     if 'ne_rel_phi' in ne['synthetic']:
@@ -100,6 +100,36 @@ def _prepare_inputs(net, data, jet, ch, ne, sv, transforms, tables):
 
     if 'log_pt' in jet['synthetic']:
         data['log_pt'] = tf.math.log(data['pt'])
+
+    # quark / gluon discrimination features
+    if 'mult' in jet['synthetic']:
+        data['mult'] = tf.math.reduce_sum(tf.cast(pf_pt > 1., tf.float32), axis=1)
+    if 'ptD' in jet['synthetic']:
+        data['ptD'] = tf.math.sqrt(tf.reduce_sum(pf_pt**2, axis=1)) / tf.reduce_sum(pf_pt, axis=1)
+    if 'axis2' in jet['synthetic']:
+        deta = pf_eta - eta
+        dphi = pf_phi - phi
+        weight = pf_pt**2
+
+        sum_weight = tf.reduce_sum(weight, axis=1)
+        ave_deta = tf.reduce_sum(deta * weight, axis=1) / sum_weight
+        ave_dphi = tf.reduce_sum(dphi * weight, axis=1) / sum_weight
+        ave_deta2 = tf.reduce_sum(deta**2 * weight, axis=1) / sum_weight
+        ave_dphi2 = tf.reduce_sum(dphi**2 * weight, axis=1) / sum_weight
+        sum_detadphi = tf.reduce_sum(deta * dphi * weight, axis=1)
+
+        a = ave_deta2 - ave_deta * ave_deta
+        b = ave_dphi2 - ave_dphi * ave_dphi
+        c = -(sum_detadphi / sum_weight - ave_deta * ave_dphi)
+
+        delta = tf.math.sqrt(tf.math.abs((a - b) * (a - b) + 4 * c**2))
+
+        data['axis2'] = tf.where(a + b - delta > 0, tf.math.sqrt(0.5 * (a + b - delta)), 0)
+
+    for field, categories in transforms['categorical'].items():
+        if field in data:
+            encoded_feature = _one_hot_encode(data[field], tables[field], categories)
+            data[field] = tf.squeeze(encoded_feature, axis=2)
 
     globals = tf.concat([data[field] for field in jet['numerical'] + jet['categorical'] + jet['synthetic']], axis=1)
     ch_constituents = tf.concat([data[field] for field in ch['numerical'] + ch['categorical'] + ch['synthetic']], axis=2)

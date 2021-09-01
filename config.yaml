@@ -72,7 +72,7 @@ data:
         pt, eta, phi, mass, area, rho, num_pv
       ]
       categorical: []
-      synthetic: [log_pt]
+      synthetic: [log_pt, mult, ptD, axis2]
     ch:
       num_points: 64 # ParticleNet point cutoff
       numerical: [
