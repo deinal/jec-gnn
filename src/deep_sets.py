@@ -4,17 +4,22 @@ from src.layers import Sum
 
 
 def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
-    ch_constituents = Input(shape=(None, num_ch), ragged=True, name='charged constituents')
+    """
+    Deep Sets
+    https://arxiv.org/abs/1703.06114
+    """
+    
+    ch_constituents = Input(shape=(None, num_ch), ragged=True, name='charged_constituents')
 
-    ne_constituents = Input(shape=(None, num_ne), ragged=True, name='neutral constituents')
+    ne_constituents = Input(shape=(None, num_ne), ragged=True, name='neutral_constituents')
 
-    secondary_vertices = Input(shape=(None, num_sv), ragged=True, name='secondary vertices')
+    secondary_vertices = Input(shape=(None, num_sv), ragged=True, name='secondary_vertices')
 
-    ch_head = _deep_sets(ch_constituents, config, name='ch')
+    ch_head = _deep_sets_block(ch_constituents, config, name='ch')
 
-    ne_head = _deep_sets(ne_constituents, config, name='ne')
+    ne_head = _deep_sets_block(ne_constituents, config, name='ne')
 
-    sv_head = _deep_sets(secondary_vertices, config, name='sv')
+    sv_head = _deep_sets_block(secondary_vertices, config, name='sv')
 
     globals = Input(shape=(num_globals,), name='globals')
 
@@ -38,7 +43,7 @@ def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
     return model
 
 
-def _deep_sets(constituents, config, name):
+def _deep_sets_block(constituents, config, name):
     constituents_slice = Input(shape=(constituents.shape[-1],), name=f'{name}_slice')
 
     if config['type'] == 'mlp':

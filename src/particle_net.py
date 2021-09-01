@@ -11,24 +11,23 @@ def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
     
     Parameters
     ----------
-    input_shapes : dict
-        The shapes of each input (`points`, `features`, `mask`).
+    The shapes of each input and network configuration.
     """
 
-    ch_fts = Input(name='charged constituents', shape=(num_points['ch'], num_ch))
-    ch_mask = Input(name='charged mask', shape=(num_points['ch'], 1))
-    ch_coord_shift = Input(name='charged coord shift', shape=(num_points['ch'], 1))
-    ch_points = Input(name='charged points', shape=(num_points['ch'], 2))
+    ch_fts = Input(name='charged_constituents', shape=(num_points['ch'], num_ch))
+    ch_mask = Input(name='charged_mask', shape=(num_points['ch'], 1))
+    ch_coord_shift = Input(name='charged_coord_shift', shape=(num_points['ch'], 1))
+    ch_points = Input(name='charged_points', shape=(num_points['ch'], 2))
 
-    ne_fts = Input(name='neutral constituents', shape=(num_points['ne'], num_ne))
-    ne_mask = Input(name='neutral mask', shape=(num_points['ne'], 1))
-    ne_coord_shift = Input(name='neutral coord shift', shape=(num_points['ne'], 1))
-    ne_points = Input(name='neutral points', shape=(num_points['ne'], 2))
+    ne_fts = Input(name='neutral_constituents', shape=(num_points['ne'], num_ne))
+    ne_mask = Input(name='neutral_mask', shape=(num_points['ne'], 1))
+    ne_coord_shift = Input(name='neutral_coord_shift', shape=(num_points['ne'], 1))
+    ne_points = Input(name='neutral_points', shape=(num_points['ne'], 2))
 
-    sv_fts = Input(name='secondary vertices', shape=(num_points['sv'], num_sv))
-    sv_mask = Input(name='sv mask', shape=(num_points['sv'], 1))
-    sv_coord_shift = Input(name='sv coord shift', shape=(num_points['sv'], 1))
-    sv_points = Input(name='sv points', shape=(num_points['sv'], 2))
+    sv_fts = Input(name='secondary_vertices', shape=(num_points['sv'], num_sv))
+    sv_mask = Input(name='sv_mask', shape=(num_points['sv'], 1))
+    sv_coord_shift = Input(name='sv_coord_shift', shape=(num_points['sv'], 1))
+    sv_points = Input(name='sv_points', shape=(num_points['sv'], 2))
     
     globals = Input(name='globals', shape=(num_globals,))
 
@@ -61,13 +60,13 @@ def _particle_net_base(
     ):
     """
     points : (N, P, C_coord)
-    features:  (N, P, C_features), optional
-    mask: (N, P, 1), optional
+    features:  (N, P, C_features)
+    mask: (N, P, 1)
     """
 
-    ch_pool = _constituent_block(ch_fts, ch_coord_shift, ch_points, ch_mask, num_points, config, prefix='ch')
-    ne_pool = _constituent_block(ne_fts, ne_coord_shift, ne_points, ne_mask, num_points, config, prefix='ne')
-    sv_pool = _constituent_block(sv_fts, sv_coord_shift, sv_points, sv_mask, num_points, config, prefix='sv')
+    ch_pool = _edge_conv_block(ch_fts, ch_coord_shift, ch_points, ch_mask, num_points, config, prefix='ch')
+    ne_pool = _edge_conv_block(ne_fts, ne_coord_shift, ne_points, ne_mask, num_points, config, prefix='ne')
+    sv_pool = _edge_conv_block(sv_fts, sv_coord_shift, sv_points, sv_mask, num_points, config, prefix='sv')
 
     x = Concatenate(name='head')([ch_pool, ne_pool, sv_pool, globals])
 
@@ -80,7 +79,7 @@ def _particle_net_base(
     return out # (N, num_classes)
 
 
-def _constituent_block(fts, coord_shift, points, mask, num_points, config, prefix):
+def _edge_conv_block(fts, coord_shift, points, mask, num_points, config, prefix):
     for layer_idx, channels in enumerate(config[prefix]['channels'], start=1):
         pts = Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, points]) if layer_idx == 1 else Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, fts])
         fts = _edge_conv(
@@ -92,12 +91,14 @@ def _constituent_block(fts, coord_shift, points, mask, num_points, config, prefi
 
 
 def _edge_conv(points, features, num_points, channels, K, config, name):
-    """EdgeConv
+    """
+    Dynamic Graph CNN for Learning on Point Clouds
+    https://export.arxiv.org/abs/1801.07829
+    
     Args:
         K: int, number of neighbors
-        in_channels: # of input channels
-        channels: tuple of output channels
-        pooling: pooling method ('max' or 'average')
+        channels: # of input channels
+        config: configuration dict
     Inputs:
         points: (N, P, C_p)
         features: (N, P, C_0)
