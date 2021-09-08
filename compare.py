@@ -440,7 +440,7 @@ if __name__ == '__main__':
     plot_distrs(df, os.path.join(args.outdir, 'distributions'))
     compare_flavours(df, os.path.join(args.outdir, 'flavours'))
 
-    binning = np.geomspace(30, 3000, 20)
+    binning = np.geomspace(20, 3000, 20)
     bin_centers = np.sqrt(binning[:-1] * binning[1:])
 
     for (ieta, eta_bin), (flavour_label, flavour_ids) in itertools.product(
