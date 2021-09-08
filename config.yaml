@@ -1,4 +1,4 @@
-net: particle_net # deep_sets or particle_net
+net: deep_sets # deep_sets or particle_net
 
 epochs: 100
 shuffle_buffer: 100
@@ -22,16 +22,22 @@ model:
     type: mlp # mlp or resnet
     activation: relu
     initializer: he_normal
-    batch_norm: True
-    dropout: 0
     head:
-      units: [256, 256, 256, 128, 64]
+      units: [1024, 512, 256, 128, 64]
+      batch_norm: False
+      dropout: 0
     ch:
-      units: [128, 128, 128, 128]
+      units: [64, 128, 256]
+      batch_norm: True
+      dropout: 0
     ne:
-      units: [64, 64, 64, 64]
+      units: [64, 128, 256]
+      batch_norm: True
+      dropout: 0
     sv:
-      units: [32, 32, 32, 32]
+      units: [32, 64, 128]
+      batch_norm: True
+      dropout: 0
 
   particle_net:
     activation: relu
@@ -42,6 +48,7 @@ model:
     ch:
       K: 16
       channels: [
+        [64, 64, 64],
         [128, 128, 128],
         [256, 256, 256]
       ]
@@ -49,16 +56,18 @@ model:
       K: 16
       channels: [
         [64, 64, 64],
-        [128, 128, 128]
+        [128, 128, 128],
+        [256, 256, 256]
       ]
     sv:
       K: 8
       channels: [
         [32, 32, 32],
-        [64, 64, 64]
+        [64, 64, 64],
+        [128, 128, 128]
       ]
     dropout: 0
-    units: [256, 128, 64]
+    units: [512, 256, 128, 64]
 
 data:
   batch_size: 1024
