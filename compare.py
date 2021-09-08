@@ -2,7 +2,7 @@ import os
 import argparse
 import pickle
 import itertools
-import awkward as ak
+import uproot
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -12,22 +12,22 @@ import matplotlib.pyplot as plt
 def read_data(paths, ds_predictions, pn_predictions):
     dfs = []
     for path in paths:
-        jet = ak.from_parquet(os.path.join(path, 'jet.parquet'))
-
-        df = pd.DataFrame(np.array(jet[['pt', 'gen_pt', 'gen_eta', 'gen_partonFlavour', 'gen_hadronFlavour']]))
-        df.columns = ['Jet_pt', 'GenJet_pt', 'GenJet_eta', 'GenJet_partonFlavour', 'GenJet_hadronFlavour']
-
-        flavour = df.GenJet_hadronFlavour.where(df.GenJet_hadronFlavour != 0, other=np.abs(df.GenJet_partonFlavour))
-        df = df.drop(columns=['GenJet_partonFlavour', 'GenJet_hadronFlavour'])
+        df = uproot.open(path)['Jets'].arrays(['pt', 'pt_gen', 'eta_gen', 'parton_flavor', 'hadron_flavor', 'pt_full_corr'], library='pd')
+        flavour = df.hadron_flavor.where(df.hadron_flavor != 0, other=np.abs(df.parton_flavor))
+        df = df.drop(columns=['parton_flavor', 'hadron_flavor'])
         df['flavour'] = flavour
        
         dfs.append(df)
 
     df = pd.concat(dfs, axis=0)
 
-    df['response'] = df.Jet_pt / df.GenJet_pt
-    df['ds_response'] = ds_predictions.flatten() * df.Jet_pt / df.GenJet_pt
-    df['pn_response'] = pn_predictions.flatten() * df.Jet_pt / df.GenJet_pt
+    df['response'] = df.pt_full_corr / df.pt_gen
+
+    ds_corrected_pt = np.exp(ds_predictions.flatten()) * df.pt
+    df['ds_response'] = ds_corrected_pt / df.pt_gen
+
+    pn_corrected_pt = np.exp(pn_predictions.flatten()) * df.pt
+    df['pn_response'] = pn_corrected_pt / df.pt_gen
 
     return df
 
@@ -44,9 +44,9 @@ def plot_distrs(dataframe, fig_dir):
         enumerate(pt_bins), enumerate(eta_bins)
     ):
         df_bin = dataframe[
-            (dataframe.GenJet_pt >= pt_bin[0]) & (dataframe.GenJet_pt < pt_bin[1])
-            & (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
-            & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
+            (dataframe.pt_gen >= pt_bin[0]) & (dataframe.pt_gen < pt_bin[1])
+            & (np.abs(dataframe.eta_gen) >= eta_bin[0])
+            & (np.abs(dataframe.eta_gen) < eta_bin[1])
         ]
         for label, selection in [
             ('uds', (df_bin.flavour <= 3) & (df_bin.flavour != 0)),
@@ -119,14 +119,14 @@ def compare_flavours(dataframe, fig_dir):
     pt_cut = 30
     for ieta, eta_bin in enumerate([(0, 2.5), (2.5, 5)], start=1):
         df_pteta = dataframe[
-            (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
-            & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
-            & (dataframe.GenJet_pt > pt_cut)
+            (np.abs(dataframe.eta_gen) >= eta_bin[0])
+            & (np.abs(dataframe.eta_gen) < eta_bin[1])
+            & (dataframe.pt_gen > pt_cut)
         ]
         ref_median, ref_median_error = [], []
         ds_median, ds_median_error = [], []
         pn_median, pn_median_error = [], []
-        flavours = [('g', {21}), ('uds', {1, 2, 3}), ('c', {4}), ('b', {5})]
+        flavours = [('g', {21}), ('u', {1}), ('d', {2}), ('s', {3}), ('c', {4}), ('b', {5})]
         for _, pdg_ids in flavours:
             df = df_pteta[df_pteta.flavour.isin(pdg_ids)]
             ref_median.append(df.response.median())
@@ -140,15 +140,15 @@ def compare_flavours(dataframe, fig_dir):
         ax = fig.add_subplot()
         ax.errorbar(
             np.arange(len(flavours)) - 0.04, ref_median, yerr=ref_median_error,
-            marker='o', ms=3, lw=0, elinewidth=0.8, label='Standard'
+            marker='s', ms=3, lw=0, elinewidth=0.8, label='Standard'
         )
         ax.errorbar(
             np.arange(len(flavours)), ds_median, yerr=ds_median_error,
-            marker='^', ms=3, lw=0, elinewidth=0.8, label='Deep Sets'
+            marker='o', ms=3, lw=0, elinewidth=0.8, label='Deep Sets'
         )
         ax.errorbar(
             np.arange(len(flavours)) + 0.04, pn_median, yerr=pn_median_error,
-            marker='s', ms=3, lw=0, elinewidth=0.8, label='ParticleNet'
+            marker='^', ms=3, lw=0, elinewidth=0.8, label='ParticleNet'
         )
         ax.set_xlim(-0.5, len(flavours) - 0.5)
         ax.axhline(1, ls='dashed', lw=0.8, c='gray')
@@ -192,21 +192,20 @@ def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta
         pn_median_error[i] = bootstrap_median(df.pn_response.to_numpy())
 
     fig = plt.figure()
-    fig.suptitle('Median ' + flavour_label + '-jet response w.r.t. gen p$_{T}$')
     
     ax = fig.add_subplot()
     
     ax.errorbar(
         bin_centers, ref_median, yerr=ref_median_error,
-        ms=3, fmt='o', elinewidth=0.8, label='Standard'
+        ms=3, fmt='s', elinewidth=0.8, label='Standard'
     )
     ax.errorbar(
         bin_centers, ds_median, yerr=ds_median_error, 
-        ms=3, fmt='^', elinewidth=0.8, label='Deep Sets'
+        ms=3, fmt='o', elinewidth=0.8, label='Deep Sets'
     )
     ax.errorbar(
         bin_centers, pn_median, yerr=pn_median_error, 
-        ms=3, fmt='s', elinewidth=0.8, label='ParticleNet'
+        ms=3, fmt='^', elinewidth=0.8, label='ParticleNet'
     )
     ax.axhline(1, ls='dashed', c='gray', alpha=.7)
     ax.set_xlabel('$p^\\mathrm{{gen}}_{T}$')
@@ -279,27 +278,31 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta):
 
     axes_upper.errorbar(
         bin_centers, ref_iqr / ref_median, yerr=ref_iqr_error / ref_median,
-        ms=3, marker='o', lw=0, elinewidth=0.8, label='Standard'
+        ms=3, marker='s', lw=0, elinewidth=0.8, label='Standard'
     )
     axes_upper.errorbar(
         bin_centers, ds_iqr / ds_median, yerr=ds_iqr_error / ds_median,
-        ms=3, marker='^', lw=0, elinewidth=0.8, label='Deep Sets'
+        ms=3, marker='o', lw=0, elinewidth=0.8, label='Deep Sets'
     )
     axes_upper.errorbar(
         bin_centers, pn_iqr / pn_median, yerr=pn_iqr_error / pn_median,
-        ms=3, marker='s', lw=0, elinewidth=0.8, label='ParticleNet'
+        ms=3, marker='^', lw=0, elinewidth=0.8, label='ParticleNet'
     )
     axes_lower.plot(
         bin_centers, (ds_iqr / ds_median) / (ref_iqr / ref_median),
-        ms=3, marker='^', lw=0, color='tab:orange'
+        ms=3, marker='o', lw=0, color='tab:orange'
     )
     axes_lower.plot(
         bin_centers, (pn_iqr / pn_median) / (ref_iqr / ref_median),
-        ms=3, marker='s', lw=0, color='tab:green'
+        ms=3, marker='^', lw=0, color='tab:green'
     )
 
     axes_upper.set_ylim(0, None)
-    axes_lower.set_ylim(0.85, 1.02)
+    if eta_bin[0] == 0:
+        axes_lower.set_ylim(0.85, 1.02)
+    else:
+        axes_lower.set_ylim(0.78, 1.02)
+        axes_lower.set_yticks([0.8, 0.9, 1.0])
     for axes in [axes_upper, axes_lower]:
         axes.set_xscale('log')
         axes.set_xlim(binning[0], binning[-1])
@@ -374,19 +377,17 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
     fig = plt.figure()
     ax = fig.add_subplot()
 
-    fig.suptitle('Median response residuals w.r.t. gen p$_{T}$')
-
     ax.errorbar(
         bin_centers, diff, yerr=err, 
-        ms=3, fmt='o', elinewidth=0.8, label='Standard'
+        ms=3, fmt='s', elinewidth=0.8, label='Standard'
     )
     ax.errorbar(
         bin_centers, ds_diff, yerr=ds_err, 
-        ms=3, fmt='^', elinewidth=0.8, label='Deep Sets'
+        ms=3, fmt='o', elinewidth=0.8, label='Deep Sets'
     )
     ax.errorbar(
         bin_centers, pn_diff, yerr=pn_err, 
-        ms=3, fmt='s', lw=0, elinewidth=0.8, label='ParticleNet'
+        ms=3, fmt='^', lw=0, elinewidth=0.8, label='ParticleNet'
     )
     ax.axhline(0, ls='dashed', c='gray', alpha=.7)
     ax.set_xlabel('$p^\\mathrm{{gen}}_{T}$')
@@ -439,22 +440,22 @@ if __name__ == '__main__':
     plot_distrs(df, os.path.join(args.outdir, 'distributions'))
     compare_flavours(df, os.path.join(args.outdir, 'flavours'))
 
-    binning = np.geomspace(30, 3000, 20)
+    binning = np.geomspace(20, 3000, 20)
     bin_centers = np.sqrt(binning[:-1] * binning[1:])
 
     for (ieta, eta_bin), (flavour_label, flavour_ids) in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
         [
-            ('uds', {1, 2, 3}), ('b', {5}), ('g', {21}),
+            ('uds', {1, 2, 3}), ('c', {4}), ('b', {5}), ('g', {21}),
             ('all', {0, 1, 2, 3, 4, 5, 21})
         ]
     ):
         df_bin = df[
-            (np.abs(df.GenJet_eta) >= eta_bin[0])
-            & (np.abs(df.GenJet_eta) < eta_bin[1])
+            (np.abs(df.eta_gen) >= eta_bin[0])
+            & (np.abs(df.eta_gen) < eta_bin[1])
             & df.flavour.isin(flavour_ids)
         ]
-        bins = df_bin.groupby(pd.cut(df_bin.GenJet_pt, binning))
+        bins = df_bin.groupby(pd.cut(df_bin.pt_gen, binning))
 
         plot_median_response(
             os.path.join(args.outdir, 'response'),
@@ -468,16 +469,16 @@ if __name__ == '__main__':
     
     for (ieta, eta_bin), flavours in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
-        itertools.combinations([('uds', {1, 2, 3}), ('b', {5}), ('g', {21})], r=2),
+        itertools.combinations([('uds', {1, 2, 3}), ('c', {4}), ('b', {5}), ('g', {21})], r=2),
     ):
         bins = []
         for i, flavour_ids in enumerate([flavours[0][1], flavours[1][1]]):
             df_bin = df[
-                (np.abs(df.GenJet_eta) >= eta_bin[0])
-                & (np.abs(df.GenJet_eta) < eta_bin[1])
+                (np.abs(df.eta_gen) >= eta_bin[0])
+                & (np.abs(df.eta_gen) < eta_bin[1])
                 & df.flavour.isin(flavour_ids)
             ]
-            bins.append(df_bin.groupby(pd.cut(df_bin.GenJet_pt, binning)))
+            bins.append(df_bin.groupby(pd.cut(df_bin.pt_gen, binning)))
 
         plot_median_residual(
             os.path.join(args.outdir, 'residual'),
