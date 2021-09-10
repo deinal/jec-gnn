@@ -5,23 +5,41 @@ import tensorflow as tf
 import argparse
 import pickle
 import yaml
-from src.deepset import get_deepset
+from src.deep_sets import get_deep_sets
 from src.particle_net import get_particle_net
 from src.data import create_datasets
 
 
-def calculate_num_features(features):
-    num_constituents = sum([
-        len(features['pf']['numerical']),
-        len(features['pf']['categorical'])
+def calculate_num_features(features, categories):
+    num_ch = sum([
+        len(features['ch']['numerical']),
+        sum([len(categories[field]) for field in features['ch']['categorical']]),
+        len(features['ch']['synthetic'])
+    ])
+    num_ne = sum([
+        len(features['ne']['numerical']),
+        sum([len(categories[field]) for field in features['ne']['categorical']]),
+        len(features['ne']['synthetic'])
+    ])
+    num_sv = sum([
+        len(features['sv']['numerical']),
+        sum([len(categories[field]) for field in features['sv']['categorical']]),
+        len(features['sv']['synthetic'])
     ])
     num_globals = sum([
         len(features['jet']['numerical']),
-        len(features['jet']['categorical'])
+        sum([len(categories[field]) for field in features['jet']['categorical']]),
+        len(features['jet']['synthetic'])
     ])
 
-    return num_constituents, num_globals
+    return num_ch, num_ne, num_sv, num_globals
 
+def get_loss():
+    def loss_fn(y_true, y_pred):
+        # Avoid spikes in loss while training by not taking unreasonable response values into account
+        mask = tf.math.logical_and(y_true > -1, y_true < 1)
+        return tf.math.reduce_mean(tf.math.abs(y_pred - y_true) * tf.cast(mask, tf.float32))
+    return loss_fn
 
 def get_callbacks(config):
     # Reduce learning rate when nearing convergence
@@ -65,24 +83,24 @@ if __name__ == '__main__':
 
     train_ds, val_ds, test_ds, metadata = create_datasets(net, args.indir, config['data'])
 
-    num_constituents, num_globals = calculate_num_features(config['data']['features'])
+    num_ch, num_ne, num_sv, num_globals = calculate_num_features(config['data']['features'], config['data']['transforms']['categorical'])
 
     train_ds = train_ds.shuffle(config['shuffle_buffer'])
 
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
-        if net == 'deepset':
-            dnn = get_deepset(
-                num_constituents, num_globals, 
-                config['model']['deepset']
+        if net == 'deep_sets':
+            dnn = get_deep_sets(
+                num_ch, num_ne, num_sv, num_globals,
+                config['model']['deep_sets']
             )
-        if net == 'particlenet':
+        if net == 'particle_net':
             dnn = get_particle_net(
-                num_constituents, num_globals, metadata['num_points'], 
-                config['model']['particlenet']
+                num_ch, num_ne, num_sv, num_globals, metadata['num_points'], 
+                config['model']['particle_net']
             )
 
-        dnn.compile(optimizer=config['optimizer'], loss=config['loss'])
+        dnn.compile(optimizer=config['optimizer'], loss=get_loss())
         dnn.optimizer.lr.assign(config['lr'])
 
     tf.keras.utils.plot_model(dnn, os.path.join(args.outdir, 'model.png'), dpi=100, show_shapes=True, expand_nested=True)
@@ -95,7 +113,7 @@ if __name__ == '__main__':
 
     # Save predictions and corresponding test files
     with open(os.path.join(args.outdir, 'predictions.pkl'), 'wb') as f:
-        pickle.dump((predictions, metadata['test_dirs']), f)
+        pickle.dump((predictions, metadata['test_files']), f)
 
     # Save training history
     with open(os.path.join(args.outdir, 'history.pkl'), 'wb') as f:

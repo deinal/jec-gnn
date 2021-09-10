@@ -2,7 +2,7 @@ import os
 import argparse
 import pickle
 import itertools
-import awkward as ak
+import uproot
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -12,23 +12,19 @@ import matplotlib.pyplot as plt
 def read_data(paths, predictions):
     dfs = []
     for path in paths:
-        jet = ak.from_parquet(os.path.join(path, 'jet.parquet'))
-
-        df = pd.DataFrame(np.array(jet[['pt', 'gen_pt', 'gen_eta', 'gen_partonFlavour', 'gen_hadronFlavour']]))
-        df.columns = ['Jet_pt', 'GenJet_pt', 'GenJet_eta', 'GenJet_partonFlavour', 'GenJet_hadronFlavour']
-
-        flavour = df.GenJet_hadronFlavour.where(df.GenJet_hadronFlavour != 0, other=np.abs(df.GenJet_partonFlavour))
-        df = df.drop(columns=['GenJet_partonFlavour', 'GenJet_hadronFlavour'])
+        df = uproot.open(path)['Jets'].arrays(['pt', 'pt_gen', 'eta_gen', 'parton_flavor', 'hadron_flavor', 'pt_full_corr'], library='pd')
+        flavour = df.hadron_flavor.where(df.hadron_flavor != 0, other=np.abs(df.parton_flavor))
+        df = df.drop(columns=['parton_flavor', 'hadron_flavor'])
         df['flavour'] = flavour
        
         dfs.append(df)
 
     df = pd.concat(dfs, axis=0)
 
-    df['response'] = df.Jet_pt / df.GenJet_pt
+    df['response'] = df.pt_full_corr / df.pt_gen
 
-    corrected_pt = predictions.flatten() * df.Jet_pt
-    df['dnn_response'] = corrected_pt / df.GenJet_pt
+    corrected_pt = np.exp(predictions.flatten()) * df.pt
+    df['dnn_response'] = corrected_pt / df.pt_gen
 
     return df
 
@@ -63,9 +59,9 @@ def plot_distrs(dataframe, fig_dir):
         enumerate(pt_bins), enumerate(eta_bins)
     ):
         df_bin = dataframe[
-            (dataframe.GenJet_pt >= pt_bin[0]) & (dataframe.GenJet_pt < pt_bin[1])
-            & (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
-            & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
+            (dataframe.pt_gen >= pt_bin[0]) & (dataframe.pt_gen < pt_bin[1])
+            & (np.abs(dataframe.eta_gen) >= eta_bin[0])
+            & (np.abs(dataframe.eta_gen) < eta_bin[1])
         ]
         for label, selection in [
             ('uds', (df_bin.flavour <= 3) & (df_bin.flavour != 0)),
@@ -133,10 +129,10 @@ def compare_flavours(dataframe, fig_dir):
     pt_cut = 30
     for ieta, eta_bin in enumerate([(0, 2.5), (2.5, 5)], start=1):
         df_pteta = dataframe[
-            (np.abs(dataframe.GenJet_eta) >= eta_bin[0])
-            & (np.abs(dataframe.GenJet_eta) < eta_bin[1])
-            & (dataframe.GenJet_pt > pt_cut)
-            & (dataframe.GenJet_pt < 3000)
+            (np.abs(dataframe.eta_gen) >= eta_bin[0])
+            & (np.abs(dataframe.eta_gen) < eta_bin[1])
+            & (dataframe.pt_gen > pt_cut)
+            & (dataframe.pt_gen < 3000)
         ]
         ref_median, ref_median_error = [], []
         dnn_median, dnn_median_error = [], []
@@ -394,9 +390,9 @@ if __name__ == '__main__':
     plot_loss(args.outdir, history)
 
     with open(f'{args.indir}/predictions.pkl', 'rb') as f:
-        predictions, test_dirs = pickle.load(f)
+        predictions, test_files = pickle.load(f)
     
-    df = read_data(test_dirs, predictions)
+    df = read_data(test_files, predictions)
 
     for subdir in ['distributions', 'flavours', 'response', 'resolution', 'residual']:
         try:
@@ -418,11 +414,11 @@ if __name__ == '__main__':
         ]
     ):
         df_bin = df[
-            (np.abs(df.GenJet_eta) >= eta_bin[0])
-            & (np.abs(df.GenJet_eta) < eta_bin[1])
+            (np.abs(df.eta_gen) >= eta_bin[0])
+            & (np.abs(df.eta_gen) < eta_bin[1])
             & df.flavour.isin(flavour_ids)
         ]
-        bins = df_bin.groupby(pd.cut(df_bin.GenJet_pt, binning))
+        bins = df_bin.groupby(pd.cut(df_bin.pt_gen, binning))
 
         plot_median_response(
             os.path.join(args.outdir, 'response'),
@@ -441,11 +437,11 @@ if __name__ == '__main__':
         bins = []
         for i, flavour_ids in enumerate([flavours[0][1], flavours[1][1]]):
             df_bin = df[
-                (np.abs(df.GenJet_eta) >= eta_bin[0])
-                & (np.abs(df.GenJet_eta) < eta_bin[1])
+                (np.abs(df.eta_gen) >= eta_bin[0])
+                & (np.abs(df.eta_gen) < eta_bin[1])
                 & df.flavour.isin(flavour_ids)
             ]
-            bins.append(df_bin.groupby(pd.cut(df_bin.GenJet_pt, binning)))
+            bins.append(df_bin.groupby(pd.cut(df_bin.pt_gen, binning)))
 
         plot_median_residual(
             os.path.join(args.outdir, 'residual'),

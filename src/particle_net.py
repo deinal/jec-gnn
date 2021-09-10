@@ -4,69 +4,101 @@ from tensorflow.keras.layers import Activation, Add, BatchNormalization, Conv2D,
 from src.layers import Mean, Max, Expand, Squeeze
 
 
-def get_particle_net(num_constituents, num_globals, num_points, config):
+def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
     """
     ParticleNet: Jet Tagging via Particle Clouds
     arxiv.org/abs/1902.08570
     
     Parameters
     ----------
-    input_shapes : dict
-        The shapes of each input (`points`, `features`, `mask`).
+    The shapes of each input and network configuration.
     """
 
-    features = Input(name='features', shape=(num_points, num_constituents))
+    ch_fts = Input(name='charged_constituents', shape=(num_points['ch'], num_ch))
+    ch_mask = Input(name='charged_mask', shape=(num_points['ch'], 1))
+    ch_coord_shift = Input(name='charged_coord_shift', shape=(num_points['ch'], 1))
+    ch_points = Input(name='charged_points', shape=(num_points['ch'], 2))
+
+    ne_fts = Input(name='neutral_constituents', shape=(num_points['ne'], num_ne))
+    ne_mask = Input(name='neutral_mask', shape=(num_points['ne'], 1))
+    ne_coord_shift = Input(name='neutral_coord_shift', shape=(num_points['ne'], 1))
+    ne_points = Input(name='neutral_points', shape=(num_points['ne'], 2))
+
+    sv_fts = Input(name='secondary_vertices', shape=(num_points['sv'], num_sv))
+    sv_mask = Input(name='sv_mask', shape=(num_points['sv'], 1))
+    sv_coord_shift = Input(name='sv_coord_shift', shape=(num_points['sv'], 1))
+    sv_points = Input(name='sv_points', shape=(num_points['sv'], 2))
+    
     globals = Input(name='globals', shape=(num_globals,))
-    points = Input(name='points', shape=(num_points, 2))
-    coord_shift = Input(name='coord_shift', shape=(num_points, 1))
-    mask = Input(name='mask', shape=(num_points, 1))
 
-    outputs = _particle_net_base(points, features, mask, coord_shift, globals, config)
+    outputs = _particle_net_base(
+        ch_fts, ch_mask, ch_coord_shift, ch_points,
+        ne_fts, ne_mask, ne_coord_shift, ne_points,
+        sv_fts, sv_mask, sv_coord_shift, sv_points,
+        globals, config, num_points
+    )
 
-    model = Model(inputs=[features, globals, points, coord_shift, mask], outputs=outputs)
+    model = Model(
+        inputs=[
+            ch_fts, ch_mask, ch_coord_shift, ch_points,
+            ne_fts, ne_mask, ne_coord_shift, ne_points,
+            sv_fts, sv_mask, sv_coord_shift, sv_points,
+            globals
+        ], outputs=outputs
+    )
 
     model.summary()
 
     return model
 
 
-def _particle_net_base(points, features, mask, coord_shift, globals, config):
+def _particle_net_base(
+        ch_fts, ch_mask, ch_coord_shift, ch_points,
+        ne_fts, ne_mask, ne_coord_shift, ne_points,
+        sv_fts, sv_mask, sv_coord_shift, sv_points,
+        globals, config, num_points
+    ):
     """
     points : (N, P, C_coord)
-    features:  (N, P, C_features), optional
-    mask: (N, P, 1), optional
+    features:  (N, P, C_features)
+    mask: (N, P, 1)
     """
 
-    # fts = tf.squeeze(BatchNormalization(name='fts_bn')(tf.expand_dims(features, axis=2)), axis=2)
-    fts = features
-    for layer_idx, channels in enumerate(config['channels'], start=1):
-        pts = Add(name=f'add_{layer_idx}')([coord_shift, points]) if layer_idx == 1 else Add(name=f'add_{layer_idx}')([coord_shift, fts])
-        fts = _edge_conv(
-            pts, fts, config['num_points'], channels, config, name=f'edge_conv_{layer_idx}'
-        )
+    ch_pool = _edge_conv_block(ch_fts, ch_coord_shift, ch_points, ch_mask, num_points, config, prefix='ch')
+    ne_pool = _edge_conv_block(ne_fts, ne_coord_shift, ne_points, ne_mask, num_points, config, prefix='ne')
+    sv_pool = _edge_conv_block(sv_fts, sv_coord_shift, sv_points, sv_mask, num_points, config, prefix='sv')
 
-    fts = Multiply()([fts, mask])
+    x = Concatenate(name='head')([ch_pool, ne_pool, sv_pool, globals])
 
-    pool = Mean(axis=1)(fts) # (N, C)
-
-    x = Concatenate(name='head')([pool, globals])
-
-    for layer_idx, units in enumerate(config['units']):
-        x = Dense(units)(x)
-        x = Activation(config['activation'])(x)
+    for layer_idx, units in enumerate(config['units'], start=1):
+        x = Dense(units, name=f'dense_{layer_idx}')(x)
+        x = Activation(config['activation'], name=f'activation_{layer_idx}')(x)
         if config['dropout']:
-            x = Dropout(config['dropout'])(x)
+            x = Dropout(config['dropout'], name=f'dropout_{layer_idx}')(x)
     out = Dense(1, name='out')(x)
     return out # (N, num_classes)
 
 
-def _edge_conv(points, features, num_points, channels, config, name):
-    """EdgeConv
+def _edge_conv_block(fts, coord_shift, points, mask, num_points, config, prefix):
+    for layer_idx, channels in enumerate(config[prefix]['channels'], start=1):
+        pts = Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, points]) if layer_idx == 1 else Add(name=f'{prefix}_add_{layer_idx}')([coord_shift, fts])
+        fts = _edge_conv(
+            pts, fts, num_points[prefix], channels, config[prefix]['K'], config, name=f'{prefix}_edge_conv_{layer_idx}'
+        )
+    fts = Multiply()([fts, mask])
+    pool = Mean(axis=1)(fts) # (N, C)
+    return pool
+
+
+def _edge_conv(points, features, num_points, channels, K, config, name):
+    """
+    Dynamic Graph CNN for Learning on Point Clouds
+    https://export.arxiv.org/abs/1801.07829
+    
     Args:
         K: int, number of neighbors
-        in_channels: # of input channels
-        channels: tuple of output channels
-        pooling: pooling method ('max' or 'average')
+        channels: # of input channels
+        config: configuration dict
     Inputs:
         points: (N, P, C_p)
         features: (N, P, C_0)
@@ -75,7 +107,7 @@ def _edge_conv(points, features, num_points, channels, config, name):
     """
 
     fts = features
-    knn_fts = KNearestNeighbors(num_points, config['K'], name=f'{name}_knn')([points, fts])
+    knn_fts = KNearestNeighbors(num_points, K, name=f'{name}_knn')([points, fts])
 
     x = knn_fts
     for idx, channel in enumerate(channels, start=1):
