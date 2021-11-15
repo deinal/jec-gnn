@@ -72,6 +72,8 @@ def _particle_net_base(
 
     for layer_idx, units in enumerate(config['units'], start=1):
         x = Dense(units, name=f'dense_{layer_idx}')(x)
+        if config['batch_norm']:
+            x = BatchNormalization(name=f'batch_normalization_{layer_idx}')(x)
         x = Activation(config['activation'], name=f'activation_{layer_idx}')(x)
         if config['dropout']:
             x = Dropout(config['dropout'], name=f'dropout_{layer_idx}')(x)

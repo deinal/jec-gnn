@@ -62,7 +62,7 @@ def _deep_sets_block(constituents, config, name):
 
 def _mlp(x, config, name):
     for idx, units in enumerate(config[name]['units'], start=1):
-        x = Dense(units, kernel_initializer=config['initializer'], name=f'{name}_dense_{idx}')(x)
+        x = Dense(units, use_bias=not config[name]['batch_norm'], kernel_initializer=config['initializer'], name=f'{name}_dense_{idx}')(x)
         if config[name]['batch_norm']:
             x = BatchNormalization(name=f'{name}_batch_normalization_{idx}')(x)
         x = Activation(config['activation'], name=f'{name}_activation_{idx}')(x)
@@ -78,9 +78,11 @@ def _resnet(x, config, name):
         n2 = units[idx + 1]
         layer_idx = idx // 2 + 1
 
-        x_main = Dense(n1, kernel_initializer=config['initializer'], name=f'{name}_dense_{layer_idx}_1')(x)
+        x_main = Dense(n1, use_bias=not config[name]['batch_norm'], kernel_initializer=config['initializer'], name=f'{name}_dense_{layer_idx}_1')(x)
+        if config[name]['batch_norm']:
+            x_main = BatchNormalization(name=f'{name}_batch_normalization_{layer_idx}_1')(x_main)
         x_main = Activation(config['activation'], name=f'{name}_activation_{layer_idx}_1')(x_main)
-        x_main = Dense(n2, kernel_initializer=config['initializer'], name=f'{name}_dense_{layer_idx}_2')(x_main)
+        x_main = Dense(n2, use_bias=not config[name]['batch_norm'], kernel_initializer=config['initializer'], name=f'{name}_dense_{layer_idx}_2')(x_main)
 
         # Include a projection to match the dimensions
         sc = Dense(n2, kernel_initializer=config['initializer'], use_bias=False, name=f'{name}_projection_{layer_idx}')(x)
@@ -89,7 +91,9 @@ def _resnet(x, config, name):
         x = Activation(config['activation'], name=f'{name}_activation_{layer_idx}_2')(x)
 
     if len(units) % 2 == 1:
-        x = Dense(units[-1], kernel_initializer=config['initializer'], name=f'{name}_dense_last')(x)
+        x = Dense(units[-1], use_bias=not config[name]['batch_norm'], kernel_initializer=config['initializer'], name=f'{name}_dense_last')(x)
+        if config[name]['batch_norm']:
+            x = BatchNormalization(name=f'{name}_batch_normalization_projection_{layer_idx}')(x)
         x = Activation(config['activation'], name=f'{name}_activation_last')(x)
 
     return x
