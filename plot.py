@@ -13,6 +13,18 @@ from functools import singledispatch
 MARKERS = ['o', 's', 'D', '^', 'v']
 COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple']
 
+SMALL_SIZE = 12
+MEDIUM_SIZE = 14
+BIG_SIZE = 16
+
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIG_SIZE)     # fontsize of the figure title
+
 
 @singledispatch
 def to_serializable(val):
@@ -202,7 +214,7 @@ def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta
         for i, (_, df) in enumerate(bins):
             median_error[name][i] = bootstrap_median(df[name].to_numpy())
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(6.4, 5.3))
     
     ax = fig.add_subplot()
     
@@ -212,7 +224,7 @@ def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta
             color=COLORS[i], ms=3, fmt=MARKERS[i], elinewidth=0.8, label=name
         )
     ax.axhline(1, ls='dashed', c='gray', alpha=.7)
-    ax.set_xlabel('$p^\\mathrm{{gen}}_{T}$')
+    ax.set_xlabel(r'$p_\mathrm{T}^\mathrm{gen}$')
     ax.set_ylabel('Median response')
     ax.text(
         1., 1.002,
@@ -266,7 +278,7 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
         for i, (_, df) in enumerate(bins):
             iqr_error[name][i] = bootstrap_iqr(df[name].to_numpy())
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(6.4, 5.3))
     gs = mpl.gridspec.GridSpec(2, 1, hspace=0.02, height_ratios=[4, 1])
     axes_upper = fig.add_subplot(gs[0, 0])
     axes_lower = fig.add_subplot(gs[1, 0])
@@ -350,7 +362,7 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
         difference[name] = median[name][0] - median[name][1]
         error[name] = np.sqrt(median_error[name][0] ** 2 + median_error[name][1] ** 2)
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(7.8, 5.3))
     ax = fig.add_subplot()
     for i, name in enumerate(names):
         ax.errorbar(
@@ -358,7 +370,7 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
             color=COLORS[i], ms=3, fmt=MARKERS[i], elinewidth=0.8, label=name
         )
     ax.axhline(0, ls='dashed', c='gray', alpha=.7)
-    ax.set_xlabel('$p^\\mathrm{{gen}}_{T}$')
+    ax.set_xlabel(r'$p_\mathrm{T}^\mathrm{gen}$')
     ax.set_ylabel('$R_{' + flavour_labels[0] + '}-R_{' + flavour_labels[1] + '}$')
     ax.text(
         1., 1.002,
@@ -411,8 +423,8 @@ if __name__ == '__main__':
 
     for subdir in ['distributions', 'flavours', 'response', 'resolution', 'residual']:
         try:
-            os.makedirs(os.path.join(args.outdir, subdir, 'png'))
-            os.makedirs(os.path.join(args.outdir, subdir, 'pdf'))
+            for ext in ['png', 'pdf']:
+                os.makedirs(os.path.join(args.outdir, subdir, ext))
         except FileExistsError:
             pass
     
