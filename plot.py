@@ -1,15 +1,29 @@
 import os
 import argparse
 import pickle
+import json
 import itertools
 import uproot
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from functools import singledispatch
 
 MARKERS = ['o', 's', 'D', '^', 'v']
 COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple']
+
+
+@singledispatch
+def to_serializable(val):
+    """Used by default."""
+    return str(val)
+
+
+@to_serializable.register(np.float32)
+def ts_float32(val):
+    """Used if *val* is an instance of numpy.float32."""
+    return np.float64(val)
 
 
 def read_data(paths, predictions):
@@ -110,6 +124,7 @@ def bootstrap_median(x, num=30):
 def compare_flavours(dataframe, names, fig_dir):
     """Plot median response as a function of jet flavour."""
     
+    data = {}
     pt_cut = 30
     for ieta, eta_bin in enumerate([(0, 2.5), (2.5, 5)], start=1):
         df_pteta = dataframe[
@@ -137,7 +152,8 @@ def compare_flavours(dataframe, names, fig_dir):
         ax.set_xlim(-0.5, len(flavours) - 0.5)
         ax.axhline(1, ls='dashed', lw=0.8, c='gray')
         ax.set_xticks(np.arange(len(flavours)))
-        ax.set_xticklabels([f[0] for f in flavours])
+        xlabels = [f[0] for f in flavours]
+        ax.set_xticklabels(xlabels)
         ax.legend()
         ax.set_ylabel('Median response')
         ax.text(
@@ -152,9 +168,28 @@ def compare_flavours(dataframe, names, fig_dir):
             axis='both', which='both', direction='in', 
             bottom=True, top=True, left=True, right=True
         )
+
+        base_median = np.array(median['Standard'])
+        baseline = np.sum(np.abs(base_median - base_median.mean()))
+        improvement = {}
+        for name in names:
+            median_arr = np.array(median[name])
+            improvement[name] = baseline / np.sum(np.abs(median_arr - median_arr.mean()))
+            median[name] = dict(zip(xlabels, median[name]))
+            median_error[name] = dict(zip(xlabels, median_error[name]))
+
+        data[f'eta{ieta}'] = {
+            'improvement': improvement,
+            'median': median, 
+            'median_error': median_error
+        }
+
         for ext in ['png', 'pdf']:
             fig.savefig(os.path.join(fig_dir, ext, f'eta{ieta}.{ext}'))
         plt.close(fig)
+
+    with open(os.path.join(fig_dir, 'data.json'), 'w') as f:
+        json.dump(data, f, indent='\t', default=to_serializable)
 
 
 def plot_median_response(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, names):
@@ -236,15 +271,19 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
     axes_upper = fig.add_subplot(gs[0, 0])
     axes_lower = fig.add_subplot(gs[1, 0])
 
+    iqr_median, iqr_median_error, ratio, improvement = {}, {}, {}, {}
     for i, name in enumerate(names):
+        iqr_median[name] = iqr[name] / median[name]
+        iqr_median_error[name] = iqr_error[name] / median[name]
+        ratio[name] = (iqr[name] / median[name]) / (iqr['Standard'] / median['Standard'])
+        improvement[name] = 100 * (1 - np.nanmean(ratio[name]))
         axes_upper.errorbar(
-            bin_centers, iqr[name] / median[name], yerr=iqr_error[name] / median[name],
+            bin_centers, iqr_median[name], yerr=iqr_median_error[name],
             color=COLORS[i], ms=3, marker=MARKERS[i], lw=0, elinewidth=0.8, label=name
         )
         if name != 'Standard':
             axes_lower.plot(
-                bin_centers, (iqr[name] / median[name]) / (iqr['Standard'] / median['Standard']),
-                color=COLORS[i], ms=3, marker=MARKERS[i], lw=0
+                bin_centers, ratio[name], color=COLORS[i], ms=3, marker=MARKERS[i], lw=0
             )
 
     axes_upper.set_ylim(0, None)
@@ -284,6 +323,17 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
         fig.savefig(os.path.join(outdir, ext, f'{flavour_label}_eta{ieta}_iqr.{ext}'))
     plt.close(fig)
 
+    for name in names:
+        iqr_median[name] = dict(zip(bin_centers, iqr_median[name]))
+        iqr_median_error[name] = dict(zip(bin_centers, iqr_median_error[name]))
+        ratio[name] =  dict(zip(bin_centers, ratio[name]))
+
+    return {
+        'improvement': improvement,
+        'iqr_median': iqr_median,
+        'iqr_median_error': iqr_median_error,
+        'ratio': ratio
+    }
 
 def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, ieta, names):
     """Plot difference in median response between flavours as a function of pt."""
@@ -323,7 +373,7 @@ def plot_median_residual(outdir, bin_centers, flavour_labels, bins, eta_bin, iet
     )
 
     for ext in ['png', 'pdf']:
-        fig.savefig(os.path.join(outdir, f'{flavour_labels[0]}-{flavour_labels[1]}_eta{ieta}.{ext}'))
+        fig.savefig(os.path.join(outdir, ext, f'{flavour_labels[0]}-{flavour_labels[1]}_eta{ieta}.{ext}'))
     plt.close(fig)
 
 
@@ -373,6 +423,7 @@ if __name__ == '__main__':
     binning = np.geomspace(20, 3000, 20)
     bin_centers = np.sqrt(binning[:-1] * binning[1:])
 
+    data = {}
     for (ieta, eta_bin), (flavour_label, flavour_ids) in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
         [
@@ -392,10 +443,13 @@ if __name__ == '__main__':
             flavour_label, bins, bin_centers, eta_bin, ieta, names
         )
 
-        plot_resolution(
+        data[f'{flavour_label}_eta{ieta}'] = plot_resolution(
             os.path.join(args.outdir, 'resolution'),
             flavour_label, bins, bin_centers, eta_bin, ieta, names
         )
+
+    with open(os.path.join(args.outdir, 'resolution', 'data.json'), 'w') as f:
+        json.dump(data, f, indent='\t', default=to_serializable)
     
     for (ieta, eta_bin), flavours in itertools.product(
         enumerate([(0, 2.5), (2.5, 5)], start=1),
