@@ -158,7 +158,7 @@ def compare_flavours(dataframe, names, fig_dir):
         ax = fig.add_subplot()
         for i, name in enumerate(names):
             ax.errorbar(
-                np.arange(len(flavours)) - 0.04, median[name], yerr=median_error[name],
+                np.arange(len(flavours)), median[name], yerr=median_error[name],
                 color=COLORS[i], marker=MARKERS[i], ms=3, lw=0, elinewidth=0.8, label=name
             )
         ax.set_xlim(-0.5, len(flavours) - 0.5)
@@ -186,7 +186,7 @@ def compare_flavours(dataframe, names, fig_dir):
         improvement = {}
         for name in names:
             median_arr = np.array(median[name])
-            improvement[name] = baseline / np.sum(np.abs(median_arr - median_arr.mean()))
+            improvement[name] = 100 * (1 - np.sum(np.abs(median_arr - median_arr.mean())) / baseline)
             median[name] = dict(zip(xlabels, median[name]))
             median_error[name] = dict(zip(xlabels, median_error[name]))
 
@@ -269,6 +269,21 @@ def compute_iqr(groups):
     return iqr
 
 
+def compute_resolution_improvement(df, names):    
+    q1 = df.quantile(0.25)
+    q2 = df.quantile(0.75)
+    iqr = q2 - q1
+    median = df.median()
+    baseline = iqr['Standard'] / median['Standard']
+    
+    improvement = {}
+    for name in names:
+        iqr_median = iqr[name] / median[name]
+        ratio = iqr_median / baseline
+        improvement[name] = 100 * (1 - ratio)
+    return improvement
+
+
 def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, names):
     median, iqr, iqr_error = {}, {}, {}
     for name in names:
@@ -287,7 +302,7 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
     for i, name in enumerate(names):
         iqr_median[name] = iqr[name] / median[name]
         iqr_median_error[name] = iqr_error[name] / median[name]
-        ratio[name] = (iqr[name] / median[name]) / (iqr['Standard'] / median['Standard'])
+        ratio[name] = iqr_median[name] / iqr_median['Standard']
         improvement[name] = 100 * (1 - np.nanmean(ratio[name]))
         axes_upper.errorbar(
             bin_centers, iqr_median[name], yerr=iqr_median_error[name],
@@ -341,7 +356,8 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
         ratio[name] =  dict(zip(bin_centers, ratio[name]))
 
     return {
-        'improvement': improvement,
+        'improvement': {},
+        'per_bin': improvement,
         'iqr_median': iqr_median,
         'iqr_median_error': iqr_median_error,
         'ratio': ratio
@@ -459,6 +475,8 @@ if __name__ == '__main__':
             os.path.join(args.outdir, 'resolution'),
             flavour_label, bins, bin_centers, eta_bin, ieta, names
         )
+
+        data[f'{flavour_label}_eta{ieta}']['improvement'] = compute_resolution_improvement(df_bin, names)
 
     with open(os.path.join(args.outdir, 'resolution', 'data.json'), 'w') as f:
         json.dump(data, f, indent='\t', default=to_serializable)

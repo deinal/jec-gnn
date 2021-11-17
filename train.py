@@ -133,14 +133,14 @@ if __name__ == '__main__':
 
     fit = dnn.fit(train_ds, validation_data=val_ds, epochs=config['epochs'], callbacks=callbacks)
 
+    test_loss = dnn.evaluate(test_ds)
+    print('Test loss:', test_loss)
+
     start = time.time()
     predictions = dnn.predict(test_ds)
     end = time.time()
     inference_time = (end - start)
     print('Inference time:', inference_time)
-
-    test_loss = dnn.evaluate(test_ds)
-    print('Test loss:', test_loss)
 
     plot_loss(fit.history, args.outdir)
     
