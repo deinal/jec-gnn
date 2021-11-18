@@ -3,3 +3,8 @@ __pycache__/
 .ipynb_checkpoints/
 .vscode/
 trashcan/
+weights.index
+weights.data*
+out.txt
+checkpoint
+dnn/

@@ -11,18 +11,23 @@ In addition to that I experiment with [ParticleNet](https://arxiv.org/abs/1902.0
 Example model structures from a few runs:
 
 <details>
-  <summary>Deep Sets MLP</summary>
-  <img title="a title" alt="Alt text" src="results/mlp/1/model.png">
-</details>
-
-<details>
-  <summary>Deep Sets ResNet</summary>
-  <img title="a title" alt="Alt text" src="results/resnet/1/model.png">
+  <summary>PFN</summary>
+  <img src="models/pfn/model.png">
 </details>
 
 <details>
   <summary>ParticleNet</summary>
-  <img title="a title" alt="Alt text" src="results/particlenet/1/model.png">
+  <img src="models/particlenet/model.png">
+</details>
+
+<details>
+  <summary>PFN-Lite</summary>
+  <img src="models/pfn-lite/model.png">
+</details>
+
+<details>
+  <summary>ParticleNet-Lite</summary>
+  <img src="models/particlenet-lite/model.png">
 </details>
 
 ## Environment
