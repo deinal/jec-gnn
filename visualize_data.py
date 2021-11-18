@@ -83,7 +83,7 @@ def plot_spectrum(jet_df, outdir):
 
 
 def plot_flavour_bars(jet_df, outdir):
-    plt.figure(figsize=(8, 5))
+    plt.figure(figsize=(8, 6.5))
     jet_df.flavour.value_counts(sort=False).loc[['u', 'd', 's', 'c', 'b', 'g', 'unknown']].plot.bar(ylabel='Number of jets')
     plt.xticks(rotation=0)
     for ext in ['png', 'pdf']:
