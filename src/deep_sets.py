@@ -7,6 +7,12 @@ def get_deep_sets(num_ch, num_ne, num_sv, num_globals, config):
     """
     Deep Sets
     https://arxiv.org/abs/1703.06114
+
+    Energy Flow Networks: Deep Sets for Particle Jets
+    https://arxiv.org/abs/1810.05165
+
+    Jet calibration with DNN
+    https://github.com/andrey-popov/ml-jec
     """
     
     ch_constituents = Input(shape=(None, num_ch), ragged=True, name='charged_constituents')

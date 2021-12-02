@@ -7,7 +7,13 @@ from src.layers import Mean, Max, Expand, Squeeze
 def get_particle_net(num_ch, num_ne, num_sv, num_globals, num_points, config):
     """
     ParticleNet: Jet Tagging via Particle Clouds
-    arxiv.org/abs/1902.08570
+    https://arxiv.org/abs/1902.08570
+
+    ParticleNet
+    https://github.com/hqucms/ParticleNet
+    
+    Weaver
+    https://github.com/hqucms/weaver
     
     Parameters
     ----------

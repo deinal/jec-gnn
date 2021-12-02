@@ -1,38 +1,24 @@
 # jec-dnn
 
-Jet Energy Corrections using DNN regression
+Jet Energy Corrections with DNN Regression
 
-## Model
+## Models
 
 The jet data is made up of variable-length unordered sets. To deal with this I use [Deep Sets](http://arxiv.org/abs/1703.06114) since the method has been used successfully before in [Energy Flow Networks](http://arxiv.org/abs/1810.05165) to discriminate quark jets from gluon jets.
 
 In addition to that I experiment with [ParticleNet](https://arxiv.org/abs/1902.08570) which is based on [Dynamic Graph Convolutional Neural Network](https://arxiv.org/abs/1801.07829). This architecture is also suitable for variable length sets.
 
-Example model structures from a few runs:
+ParticleNet | EdgeConv block
+--- | --- 
+![](models/pfn.png) | ![](models/deep_sets.png)
 
-<details>
-  <summary>PFN</summary>
-  <img src="models/pfn/model.png">
-</details>
-
-<details>
-  <summary>ParticleNet</summary>
-  <img src="models/particlenet/model.png">
-</details>
-
-<details>
-  <summary>PFN-Lite</summary>
-  <img src="models/pfn-lite/model.png">
-</details>
-
-<details>
-  <summary>ParticleNet-Lite</summary>
-  <img src="models/particlenet-lite/model.png">
-</details>
+Particle Flow Network | Deep Sets block
+--- | --- 
+![](models/particlenet.png) | ![](models/edge_conv.png)
 
 ## Environment
 
-Build the Docker image (essentially the dependencies in `requirements.txt` on top of `tensorflow/tensorflow:latest-gpu`).
+Build the Docker image: dependencies in `requirements.txt` on top of `tensorflow/tensorflow:latest-gpu`).
 
 ```bash
 docker build . -t jec-dnn

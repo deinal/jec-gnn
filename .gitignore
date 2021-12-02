@@ -8,3 +8,4 @@ weights.data*
 out.txt
 checkpoint
 dnn/
+notebooks/

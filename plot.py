@@ -333,7 +333,7 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
         ),
         ha='right', va='bottom', transform=axes_upper.transAxes
     )
-    axes_upper.set_ylabel('IQR / median for response')
+    axes_upper.set_ylabel('IQR / Median response')
     axes_lower.set_ylabel('Ratio')
     axes_lower.set_xlabel(r'$p_\mathrm{T}^\mathrm{gen}$')
     axes_upper.tick_params(
