@@ -57,3 +57,24 @@ E.g.
 ```
 python plot.py -i results/resnet -o figs/resnet
 ```
+
+### Use models
+
+To load trained model weights and make predictions, run e.g.
+
+```
+python predict.py --model_dir models/pfn --pred_dir . --data_dir data/dev_shards
+```
+
+For this to work, root files with the same feature names as in the config files in the saved model directories are needed. The script will then produce a pickle file with predictions as an array in the specified output directory.
+
+### Cite
+
+```
+@mastersthesis{jec_with_gnn_regression,
+  title  = {Jet Energy Corrections with Graph Neural Network Regression},
+  author = {Holmberg, Daniel},
+  school = {University of Helsinki},
+  year   = {2022}
+}
+```

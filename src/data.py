@@ -15,15 +15,15 @@ def create_datasets(net, indir, config):
     test_files = root_files[train_split:test_split]
     val_files = root_files[test_split:]
 
-    train_ds = _create_dataset(
+    train_ds = create_dataset(
         net, train_files, config['features'],
         config['batch_size'], config['transforms']
     )
-    test_ds = _create_dataset(
+    test_ds = create_dataset(
         net, test_files, config['features'],
         config['batch_size'], config['transforms']
     )
-    val_ds = _create_dataset(
+    val_ds = create_dataset(
         net, val_files, config['features'],
         config['batch_size'], config['transforms']
     )
@@ -42,7 +42,7 @@ def create_datasets(net, indir, config):
     return train_ds, val_ds, test_ds, metadata
 
 
-def _create_dataset(net, paths, features, batch_size, transforms):
+def create_dataset(net, paths, features, batch_size, transforms):
     dataset = tf.data.Dataset.from_tensor_slices(paths)
     dataset = dataset.map(
         lambda path: _retrieve_data(
