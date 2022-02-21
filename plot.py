@@ -10,7 +10,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from functools import singledispatch
 
-MARKERS = ['o', 's', 'D', '^', 'v']
+MARKERS = ['x', 's', 'o', '^', 'v']
+FLAVOR_MARKERS = ['*', 's', 'o', '^', 'v']
 COLORS = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple']
 
 SMALL_SIZE = 12
@@ -156,10 +157,12 @@ def compare_flavours(dataframe, names, fig_dir):
 
         fig = plt.figure()
         ax = fig.add_subplot()
+        offset = [0.1 * i for i in range(len(names))]
+        offset = offset - np.mean(offset)
         for i, name in enumerate(names):
             ax.errorbar(
-                np.arange(len(flavours)), median[name], yerr=median_error[name],
-                color=COLORS[i], marker=MARKERS[i], ms=3, lw=0, elinewidth=0.8, label=name
+                np.arange(len(flavours)) + offset[i], median[name], yerr=median_error[name],
+                color=COLORS[i], marker=FLAVOR_MARKERS[i], ms=5, lw=0, elinewidth=0.8, label=name
             )
         ax.set_xlim(-0.5, len(flavours) - 0.5)
         ax.axhline(1, ls='dashed', lw=0.8, c='gray')
@@ -315,8 +318,10 @@ def plot_resolution(outdir, flavour_label, bins, bin_centers, eta_bin, ieta, nam
 
     axes_upper.set_ylim(0, None)
     if eta_bin[0] == 0:
+        axes_upper.set_ylim(0.0, 0.31)
         axes_lower.set_ylim(0.85, 1.02)
     else:
+        axes_upper.set_ylim(0.0, 0.38)
         axes_lower.set_ylim(0.78, 1.02)
         axes_lower.set_yticks([0.8, 0.9, 1.0])
     for axes in [axes_upper, axes_lower]:
