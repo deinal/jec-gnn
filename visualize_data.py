@@ -178,6 +178,68 @@ def plot_qgl(jet_df, pf, outdir):
     qgl_step(sample, 'axis2', '$\sigma_2$', nbins, outdir)
 
 
+def load_large_jet(file):
+    f = uproot.open(file)['Jets']
+    arr = f.arrays(['ne_eta', 'ne_phi', 'ne_pt', 'ch_eta', 'ch_phi', 'ch_pt', 'sv_eta', 'sv_phi', 'sv_pt'])
+    max_index = ak.argmax(ak.num(arr.sv_eta))
+    jet = arr[max_index]
+    return jet
+
+
+def plot_particle_cloud(jet, simple, outdir):
+    plt.rc('font', size=12)
+    plt.rc('axes', titlesize=12)
+    plt.rc('xtick', labelsize=12)
+    plt.rc('ytick', labelsize=12)
+    plt.rc('legend', fontsize=12)
+
+    fig = plt.figure(figsize=(5.7, 5.7))
+    ax = fig.add_subplot()
+
+    al = 7
+    arrowprops=dict(
+        arrowstyle='fancy',
+        mutation_scale=20,
+        color='k'
+    )
+    kwargs = dict(
+      xycoords='axes fraction',
+      textcoords='offset points',
+      arrowprops=arrowprops,
+    )
+
+    ax.annotate("", (1.01, -0.0), xytext=(-al, 0.0), **kwargs) # bottom spine arrow
+    ax.annotate("", (0.0, 1.01), xytext=(0.0, -al), **kwargs) # left spin arrow
+
+    for side in ['top', 'right']:
+        ax.spines[side].set_visible(False)
+
+    ax.yaxis.tick_left()
+    ax.xaxis.tick_bottom()
+
+    ax.scatter(jet.ch_eta, jet.ch_phi, s=2*jet.ch_pt, alpha=1.0, label='Charged particles')
+    ax.scatter(jet.ne_eta, jet.ne_phi, s=2*jet.ne_pt, alpha=0.9, label='Neutral particles')
+    ax.scatter(jet.sv_eta, jet.sv_phi, s=2*jet.sv_pt, alpha=0.8, label='Secondary vertices')
+    ax.set_xlabel('$\eta$')
+    ax.set_ylabel('$\phi$')
+    for axis in ['top','bottom','left','right']:
+        ax.spines[axis].set_linewidth(1.5)
+    
+    name = 'particle_cloud'
+    if simple:
+        ax.set_xticks([])
+        ax.set_yticks([])
+        name += '_simple'
+    else:
+        legend = ax.legend(borderaxespad=1)
+        for handle in legend.legendHandles:
+            handle.set_sizes([30])
+    
+    for ext in ['png', 'pdf']:
+        plt.savefig(os.path.join(outdir, ext, f'{name}.{ext}'))
+    plt.close(fig)
+
+
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description=__doc__)
     arg_parser.add_argument('-i', '--indir', required=True, help='Data directory')
@@ -199,3 +261,9 @@ if __name__ == '__main__':
     plot_qgl(jet_df, pf_array, args.outdir)
 
     plot_flavour_bars(jet_df, args.outdir)
+
+    first_file = sorted(os.listdir(args.indir))[0]
+    file_path = os.path.join(args.indir, first_file)
+    jet = load_large_jet(file_path)
+    plot_particle_cloud(jet, False, args.outdir)
+    plot_particle_cloud(jet, True, args.outdir)
