@@ -74,6 +74,14 @@ python predict.py --model_dir models/particlenet --data_dir data/shards --pred_d
 
 For this to work, root files with the same feature names as in the config files in the saved model directories are needed. The script will then produce a pickle file with predictions as an array in the specified output directory.
 
+
+### Benchmark standard JEC
+
+Prerequisite: produce QCD Flat NanoAOD file using https://github.com/deinal/PFNano
+```
+python standard_benchmark.py -n nano106Xv8_on_mini106X_2017_mc_NANO_py_NANO_10.root -j Summer19UL18_V5_MC_L1FastJet_AK4PFchs.txt
+```
+
 ### Cite
 
 ```
