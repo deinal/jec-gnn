@@ -1,6 +1,6 @@
 # jec-dnn
 
-Jet Energy Corrections with DNN Regression
+Jet Energy Corrections with Graph Neural Network Regression
 
 ## Models
 
@@ -41,21 +41,27 @@ docker start -i <container id>
 To train once you can edit `config.yaml` to your liking and then run something like:
 
 ```
-python train.py -i data/test -o results/test-run -c config.yaml --gpus 1 3
+python train.py -i data/shards -o models/particlenet -c config.yaml --gpus 0 1
 ```
 
 Train using multiple configuration files:
 
 ```
-nohup ./run_configs.sh -o results/resnet -c configs/resnet -d data/test -g 0 > resnet.txt
+nohup ./run_configs.sh -d data/shards -o results/resnet -c configs/resnet -g 0 > resnet.txt
 ```
 
 ### Plot results
 
-E.g.
+Plot the training results
 
 ```
-python plot.py -i results/resnet -o figs/resnet
+python plot.py -i "models/pfn, models/particlenet, models/pfn-lite, models/particlenet-lite" -n "PFN-r, ParticleNet-r, PFN-r Lite, ParticleNet-r Lite" -o figures/results
+```
+
+Produce visualizations of the dataset
+
+```
+python visualize_data.py -i data/shards -o figures/dataset
 ```
 
 ### Use models
@@ -63,7 +69,7 @@ python plot.py -i results/resnet -o figs/resnet
 To load trained model weights and make predictions, run e.g.
 
 ```
-python predict.py --model_dir models/pfn --pred_dir . --data_dir data/dev_shards
+python predict.py --model_dir models/particlenet --data_dir data/shards --pred_dir .
 ```
 
 For this to work, root files with the same feature names as in the config files in the saved model directories are needed. The script will then produce a pickle file with predictions as an array in the specified output directory.
