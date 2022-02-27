@@ -1,4 +1,5 @@
-from coffea.jetmet_tools import FactorizedJetCorrector
+#!/usr/bin/env python
+
 from coffea.jetmet_tools import JECStack, CorrectedJetsFactory
 from coffea.nanoevents import NanoEventsFactory
 from coffea.lookup_tools import extractor
@@ -11,21 +12,24 @@ import time
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description=__doc__)
-    arg_parser.add_argument('-n', '--nanoaod', required=True, help='NanoAOD data')
-    arg_parser.add_argument('-j', '--jecfile', required=True, help='Jet energy corrections file')
+    arg_parser.add_argument('--nanoaod', required=True, help='NanoAOD data')
+    arg_parser.add_argument('--l1', required=True, help='L1 JEC file')
+    arg_parser.add_argument('--l2', required=True, help='L2 JEC file')
     args = arg_parser.parse_args()
 
     events = NanoEventsFactory.from_root(args.nanoaod).events()
     jets = events.Jet
-    print('# jets:', len(jets))
+    num_jets = len(jets)
+    print('Total number of jets:', num_jets)
 
     ext = extractor()
-    ext.add_weight_sets([f'* * {args.jecfile}'])
+    ext.add_weight_sets([f'* * {args.l1}', f'* * {args.l2}'])
     ext.finalize()
     evaluator = ext.make_evaluator()
 
-    jec_name = Path(args.jecfile).stem
-    jec_stack_names = [jec_name]
+    l1_name = Path(args.l1).stem
+    l2_name = Path(args.l2).stem
+    jec_stack_names = [l1_name, l2_name]
 
     jec_inputs = {name: evaluator[name] for name in jec_stack_names}
     jec_stack = JECStack(jec_inputs)
@@ -46,13 +50,12 @@ if __name__ == '__main__':
     name_map['Rho'] = 'rho'
 
     events_cache = events.caches[0]
-    corrector = FactorizedJetCorrector(Summer19UL18_V5_MC_L1FastJet_AK4PFchs=evaluator[jec_name])
 
     jet_factory = CorrectedJetsFactory(name_map, jec_stack)
 
     start = time.time()
     corrected_jets = jet_factory.build(jets, lazy_cache=events_cache)
     end = time.time()
-    inference_time = (end - start) / len(jets)
+    inference_time = (end - start) / num_jets
     
-    print('Inference time:', inference_time * 1000, 'ms')
+    print('Inference time:', inference_time * 1000, 'ms per jet')

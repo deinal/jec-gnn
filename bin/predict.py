@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import tensorflow as tf
 from train import calculate_num_features
 from src.data import create_dataset
@@ -7,6 +9,7 @@ import argparse
 import pickle
 import yaml
 import glob
+import time
 import os
 
 if __name__ == '__main__':
@@ -46,7 +49,11 @@ if __name__ == '__main__':
 
     ds = create_dataset(net, files, cd['features'], cd['batch_size'], cd['transforms'])
 
+    start = time.time()
     predictions = dnn.predict(ds)
+    end = time.time()
+
+    print('Inference time:', end - start)
 
     with open(os.path.join(args.pred_dir, 'predictions.pkl'), 'wb') as f:
         pickle.dump(predictions, f)

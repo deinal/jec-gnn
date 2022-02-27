@@ -2,7 +2,8 @@ data/
 __pycache__/
 .ipynb_checkpoints/
 .vscode/
-trashcan/
+old/
 out.txt
 dnn/
 notebooks/
+*.root

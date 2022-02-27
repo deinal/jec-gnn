@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 import argparse
 import pickle
@@ -138,12 +140,17 @@ def compare_flavours(dataframe, names, fig_dir):
     """Plot median response as a function of jet flavour."""
     
     data = {}
-    pt_cut = 30
-    for ieta, eta_bin in enumerate([(0, 2.5), (2.5, 5)], start=1):
+
+    pt_bins = [(30, np.inf), (30, 50), (50, 100), (100, 300), (300, 1000), (1000, np.inf)]
+    eta_bins = [(0., 2.5), (2.5, 5)]
+
+    for (ipt, pt_bin), (ieta, eta_bin) in itertools.product(
+        enumerate(pt_bins), enumerate(eta_bins)
+    ):
         df_pteta = dataframe[
-            (np.abs(dataframe.eta_gen) >= eta_bin[0])
+            (dataframe.pt_gen >= pt_bin[0]) & (dataframe.pt_gen < pt_bin[1])
+            & (np.abs(dataframe.eta_gen) >= eta_bin[0])
             & (np.abs(dataframe.eta_gen) < eta_bin[1])
-            & (dataframe.pt_gen > pt_cut)
         ]
         median, median_error = {}, {}
         for name in names:
@@ -171,14 +178,25 @@ def compare_flavours(dataframe, names, fig_dir):
         ax.set_xticklabels(xlabels)
         ax.legend()
         ax.set_ylabel('Median response')
-        ax.text(
-            1., 1.002,
-            r'$p_\mathrm{{T}}^\mathrm{{gen}} > {:g}$ GeV, '
-            r'${:g} < |\eta^\mathrm{{gen}}| < {:g}$'.format(
-                pt_cut, eta_bin[0], eta_bin[1]
-            ),
-            ha='right', va='bottom', transform=ax.transAxes
-        )
+        if pt_bins[ipt][1] == np.inf:
+            ax.text(
+                1., 1.002,
+                r'$p_\mathrm{{T}}^\mathrm{{gen}} > {:g}$ GeV, '
+                r'${:g} < |\eta^\mathrm{{gen}}| < {:g}$'.format(
+                    pt_bins[ipt][0], eta_bin[0], eta_bin[1]
+                ),
+                ha='right', va='bottom', transform=ax.transAxes
+            )
+        else:
+            ax.text(
+                1., 1.002,
+                r'${:g} < p_\mathrm{{T}}^\mathrm{{gen}} < {:g}$ GeV, '
+                r'${:g} < |\eta^\mathrm{{gen}}| < {:g}$'.format(
+                    pt_bins[ipt][0], pt_bins[ipt][1],
+                    eta_bins[ieta][0], eta_bins[ieta][1]
+                ),
+                ha='right', va='bottom', transform=ax.transAxes
+            )
         ax.tick_params(
             axis='both', which='both', direction='in', 
             bottom=True, top=True, left=True, right=True
@@ -193,14 +211,14 @@ def compare_flavours(dataframe, names, fig_dir):
             median[name] = dict(zip(xlabels, median[name]))
             median_error[name] = dict(zip(xlabels, median_error[name]))
 
-        data[f'eta{ieta}'] = {
+        data[f'pt{ipt+1}eta{ieta+1}'] = {
             'improvement': improvement,
             'median': median, 
             'median_error': median_error
         }
 
         for ext in ['png', 'pdf']:
-            fig.savefig(os.path.join(fig_dir, ext, f'eta{ieta}.{ext}'))
+            fig.savefig(os.path.join(fig_dir, ext, f'pt{ipt+1}eta{ieta+1}.{ext}'))
         plt.close(fig)
 
     with open(os.path.join(fig_dir, 'data.json'), 'w') as f:
@@ -481,7 +499,14 @@ if __name__ == '__main__':
             flavour_label, bins, bin_centers, eta_bin, ieta, names
         )
 
-        data[f'{flavour_label}_eta{ieta}']['improvement'] = compute_resolution_improvement(df_bin, names)
+        for (ipt, pt_bin) in enumerate(
+                [(30, np.inf), (30, 50), (50, 100), (100, 300), (300, 1000), (1000, np.inf)], start=1
+            ):
+            pt_bin = df_bin[
+                (df_bin.pt_gen >= pt_bin[0])
+                & (df_bin.pt_gen < pt_bin[1])
+            ]
+            data[f'{flavour_label}_eta{ieta}']['improvement'][f'pt{ipt}'] = compute_resolution_improvement(pt_bin, names)
 
     with open(os.path.join(args.outdir, 'resolution', 'data.json'), 'w') as f:
         json.dump(data, f, indent='\t', default=to_serializable)
