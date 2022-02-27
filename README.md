@@ -1,30 +1,45 @@
-# jec-dnn
+# jec-gnn
 
 Jet Energy Corrections with Graph Neural Network Regression
 
+## Data
+
+The data used in this study consists of 14 million jets, of which 60% are used for training, 20% for validation and 20% for testing. The data is stitched together from multiple LHC Run 2 Summer 16 $H_T$-binned QCD samples. The [ml-jec-vars](https://gitlab.cern.ch/dholmber/ml-jec-vars) code, which is created for especially ML JEC, was used to produce the training data.
+
+The data consists of global jet features, in addition to jet constituents forming unordered sets. There are three collections of constituents: charged particles, neutral particles and secondary vertices. The image below shows the constituents of a single jet in the ($\eta, \phi$)-plane. Data in this format is known as a point cloud in machine learning terms, or a particle cloud in high energy physics lingua.
+
+<img src="figures/dataset/png/particle_cloud.png" width="300px">
+
 ## Models
 
-The jet data is made up of variable-length unordered sets. To deal with this I use [Deep Sets](http://arxiv.org/abs/1703.06114) since the method has been used successfully before in [Energy Flow Networks](http://arxiv.org/abs/1810.05165) to discriminate quark jets from gluon jets.
+[Deep Sets](http://arxiv.org/abs/1703.06114) apply a shared MLP to every set member, and then use permutation invariant aggregation to learn global features. This type of model has been used successfully before in [Energy Flow Networks](http://arxiv.org/abs/1810.05165) which introduced Particle Flow Network among other variants to discriminate quark jets from gluon jets.
 
-In addition to that I experiment with [ParticleNet](https://arxiv.org/abs/1902.08570) which is based on [Dynamic Graph Convolutional Neural Network](https://arxiv.org/abs/1801.07829). This architecture is also suitable for variable length sets.
-
-ParticleNet | EdgeConv block
---- | --- 
-![](models/pfn.png) | ![](models/deep_sets.png)
+[Dynamic Graph Convolutional Neural Network](https://arxiv.org/abs/1801.07829) initializes a graph (e.g. in 3D space) and uses k-NN to build a local neighborhood for every node. Graph convolution updates node embeddings, and the new latent features are used to construct an updated graph for the next convolution block. Global pooling is used to aggregate individual node level features to graph level. While the architecure is originally intended for point clouds in computer vision, it has been applied as [ParticleNet](https://arxiv.org/abs/1902.08570) to particle clouds.
 
 Particle Flow Network | Deep Sets block
 --- | --- 
-![](models/particlenet.png) | ![](models/edge_conv.png)
+![](figures/models/pfn.png) | ![](figures/models/deep_sets.png)
+
+ParticleNet | EdgeConv block
+--- | --- 
+![](figures/models/particlenet.png) | ![](figures/models/edge_conv.png)
 
 ## Environment
 
-Build the Docker image: dependencies in `requirements.txt` on top of `tensorflow/tensorflow:latest-gpu`).
+Build the Docker image
+- base `tensorflow/tensorflow:2.4.1-gpu`
+- install additional dependencies from `requirements.txt`
+- make executables accessible by adding `bin` to path
 
 ```bash
-docker build . -t jec-dnn
+docker build . -t jec-gnn
 ```
 
-Enter a container with the current directory mounted using your user privileges.
+Start a container
+- interactively
+- with current directory mounted
+- using your own user id
+- gpus accessible inside container
 
 ```bash
 ./run_docker.sh
@@ -36,53 +51,74 @@ Re-enter stopped container
 docker start -i <container id>
 ```
 
-### Training
+## Train
 
-To train once you can edit `config.yaml` to your liking and then run something like:
+Train once
+- specify training setup in a yaml file
+- example configuration in `config.yaml`
 
 ```
-python train.py -i data/shards -o models/particlenet -c config.yaml --gpus 0 1
+train.py -i data/shards -o models/particlenet -c config.yaml --gpus 0 1
 ```
 
-Train using multiple configuration files:
+Train multiple variations
+- run all configuration files in a single folder
 
 ```
 nohup ./run_configs.sh -d data/shards -o results/resnet -c configs/resnet -g 0 > resnet.txt
 ```
 
-### Plot results
+## Figures
 
-Plot the training results
-
-```
-python plot.py -i "models/pfn, models/particlenet, models/pfn-lite, models/particlenet-lite" -n "PFN-r, ParticleNet-r, PFN-r Lite, ParticleNet-r Lite" -o figures/results
-```
-
-Produce visualizations of the dataset
-
-```
-python visualize_data.py -i data/shards -o figures/dataset
-```
-
-### Use models
-
-To load trained model weights and make predictions, run e.g.
+Plot results
+- response distribution
+- flavor dependence
+- resolution
+- residual response
+- pdf and png in separate folders
 
 ```
-python predict.py --model_dir models/particlenet --data_dir data/shards --pred_dir .
+plot.py -i "models/pfn, models/particlenet, models/pfn-lite, models/particlenet-lite" -n "PFN-r, ParticleNet-r, PFN-r Lite, ParticleNet-r Lite" -o figures/results
 ```
 
-For this to work, root files with the same feature names as in the config files in the saved model directories are needed. The script will then produce a pickle file with predictions as an array in the specified output directory.
+Visualize data
+- heatmap of dataset in pt and eta bins
+- flavor distribution
+- particle cloud
+- training target
+- multiplicity
+- jet ellipse minor axis
+- pt distribution variable
 
-
-### Benchmark standard JEC
-
-Prerequisite: produce QCD Flat NanoAOD file using https://github.com/deinal/PFNano
 ```
-python standard_benchmark.py -n nano106Xv8_on_mini106X_2017_mc_NANO_py_NANO_10.root -j Summer19UL18_V5_MC_L1FastJet_AK4PFchs.txt
+visualize_data.py -i data/shards -o figures/dataset
 ```
 
-### Cite
+## Predict
+
+Inference with saved models
+- load saved model weights
+- make predictions for input data
+- store correction factor as pickled array
+- output total inference time
+
+```
+predict.py --model_dir models/particlenet --data_dir data/shards --pred_dir .
+```
+
+## Standard benchmark
+
+Run inference for standard approach
+- use coffea jetmet tools
+- build jec stack consisting of l1 and l2 corrections
+- run on a QCD Flat NanoAOD file
+- prerequisite: produced data using https://github.com/deinal/PFNano
+
+```
+standard_benchmark.py --nanoaod data/nano/nano106Xv8_on_mini106X_2017_mc_NANO_py_NANO_10.root --l1 data/nano/Summer19UL18_V5_MC_L1FastJet_AK4PFchs.txt --l2 data/nano/Summer19UL18_V5_MC_L2Relative_AK4PFchs.txt
+```
+
+## Cite
 
 ```
 @mastersthesis{jec_with_gnn_regression,
